@@ -32,9 +32,8 @@ async fn main() {
     let session_layer = SessionManagerLayer::new(session_store);
 
     // Create the auth router with GitHub provider
-    let github = GitHubProvider::from_env().expect(
-        "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET environment variables",
-    );
+    let github = GitHubProvider::from_env()
+        .expect("Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET environment variables");
 
     let auth = AuthRouter::new(MemoryStore::new(), "http://localhost:3000")
         .with_provider(github)

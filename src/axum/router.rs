@@ -10,6 +10,7 @@ pub mod session_keys {
     pub const USER_ID: &str = "oauth_kit_user_id";
     pub const CSRF_STATE: &str = "oauth_kit_csrf_state";
     pub const PKCE_VERIFIER: &str = "oauth_kit_pkce_verifier";
+    pub const NONCE: &str = "oauth_kit_nonce";
     pub const PROVIDER: &str = "oauth_kit_provider";
 }
 

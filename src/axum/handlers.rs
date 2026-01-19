@@ -7,7 +7,6 @@ use tower_sessions::Session;
 use tracing::{error, info};
 
 use super::router::{session_keys, AuthState};
-use crate::provider::OAuthClient;
 use crate::store::UserStore;
 
 #[derive(Debug, Deserialize)]
@@ -37,19 +36,8 @@ pub async fn signin<S: UserStore + Clone>(
     };
 
     let callback_url = state.callback_url(&provider_id);
-    let client = match OAuthClient::new(provider, &callback_url) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to create OAuth client: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create OAuth client",
-            )
-                .into_response();
-        }
-    };
 
-    let auth_request = match client.authorization_url() {
+    let auth_request = match provider.authorization_url(&callback_url).await {
         Ok(r) => r,
         Err(e) => {
             error!("Failed to generate authorization URL: {}", e);
@@ -61,7 +49,7 @@ pub async fn signin<S: UserStore + Clone>(
         }
     };
 
-    // Store CSRF state and PKCE verifier in session
+    // Store CSRF state in session
     if let Err(e) = session
         .insert(session_keys::CSRF_STATE, &auth_request.csrf_state)
         .await
@@ -74,11 +62,9 @@ pub async fn signin<S: UserStore + Clone>(
             .into_response();
     }
 
+    // Store PKCE verifier if present
     if let Some(ref verifier) = auth_request.pkce_verifier {
-        if let Err(e) = session
-            .insert(session_keys::PKCE_VERIFIER, verifier)
-            .await
-        {
+        if let Err(e) = session.insert(session_keys::PKCE_VERIFIER, verifier).await {
             error!("Failed to store PKCE verifier: {}", e);
             return (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -88,10 +74,20 @@ pub async fn signin<S: UserStore + Clone>(
         }
     }
 
-    if let Err(e) = session
-        .insert(session_keys::PROVIDER, &provider_id)
-        .await
-    {
+    // Store nonce if present (for OIDC)
+    if let Some(ref nonce) = auth_request.nonce {
+        if let Err(e) = session.insert(session_keys::NONCE, nonce).await {
+            error!("Failed to store nonce: {}", e);
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Session error",
+            )
+                .into_response();
+        }
+    }
+
+    // Store provider ID
+    if let Err(e) = session.insert(session_keys::PROVIDER, &provider_id).await {
         error!("Failed to store provider: {}", e);
         return (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -126,11 +122,7 @@ pub async fn callback<S: UserStore + Clone>(
     }
 
     // Validate CSRF state
-    let stored_state: Option<String> = session
-        .get(session_keys::CSRF_STATE)
-        .await
-        .ok()
-        .flatten();
+    let stored_state: Option<String> = session.get(session_keys::CSRF_STATE).await.ok().flatten();
     let received_state = params.state;
 
     match (stored_state, received_state) {
@@ -175,6 +167,9 @@ pub async fn callback<S: UserStore + Clone>(
         .ok()
         .flatten();
 
+    // Get nonce if stored (for OIDC)
+    let nonce: Option<String> = session.get(session_keys::NONCE).await.ok().flatten();
+
     // Get provider
     let provider = match state.providers.get(&provider_id) {
         Some(p) => p,
@@ -188,22 +183,15 @@ pub async fn callback<S: UserStore + Clone>(
         }
     };
 
-    // Create OAuth client and exchange code
+    // Exchange code for user info
     let callback_url = state.callback_url(&provider_id);
-    let client = match OAuthClient::new(provider, &callback_url) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to create OAuth client: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create OAuth client",
-            )
-                .into_response();
-        }
-    };
-
-    let (user, _access_token) = match client
-        .exchange_code(&code, pkce_verifier.as_deref())
+    let (user, _access_token) = match provider
+        .exchange_code(
+            &callback_url,
+            &code,
+            pkce_verifier.as_deref(),
+            nonce.as_deref(),
+        )
         .await
     {
         Ok(result) => result,
@@ -236,12 +224,9 @@ pub async fn callback<S: UserStore + Clone>(
     };
 
     // Clear OAuth session data
-    let _ = session
-        .remove::<String>(session_keys::CSRF_STATE)
-        .await;
-    let _ = session
-        .remove::<String>(session_keys::PKCE_VERIFIER)
-        .await;
+    let _ = session.remove::<String>(session_keys::CSRF_STATE).await;
+    let _ = session.remove::<String>(session_keys::PKCE_VERIFIER).await;
+    let _ = session.remove::<String>(session_keys::NONCE).await;
     let _ = session.remove::<String>(session_keys::PROVIDER).await;
 
     // Store user ID in session

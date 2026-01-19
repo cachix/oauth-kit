@@ -95,9 +95,7 @@ pub enum AuthError {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         match self {
-            AuthError::Unauthorized => {
-                (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
-            }
+            AuthError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized").into_response(),
             AuthError::SessionError => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Session error").into_response()
             }

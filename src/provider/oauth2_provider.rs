@@ -4,13 +4,28 @@
 //! standard OAuth2 but require fetching user profile from a separate endpoint.
 
 use async_trait::async_trait;
+use oauth2::{
+    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+};
 use serde::de::DeserializeOwned;
 
 use crate::error::{Error, Result};
 use crate::User;
 
+use super::AuthorizationRequest;
+
 /// Profile normalization function type.
 pub type ProfileNormalizer = fn(serde_json::Value) -> Result<User>;
+
+/// Async profile normalizer that can make additional API calls.
+pub type AsyncProfileNormalizer = for<'a> fn(
+    &'a reqwest::Client,
+    &'a str,
+    Option<serde_json::Value>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<User>> + Send + 'a>,
+>;
 
 /// Generic OAuth2 provider configuration.
 ///
@@ -89,40 +104,85 @@ impl super::OAuthProvider for OAuth2Provider {
         &self.name
     }
 
-    fn authorization_url(&self) -> &str {
-        &self.authorization_url
+    async fn authorization_url(&self, redirect_url: &str) -> Result<AuthorizationRequest> {
+        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
+            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
+            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
+            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
+            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+
+        let mut auth_request = client.authorize_url(CsrfToken::new_random);
+
+        for scope in &self.scopes {
+            auth_request = auth_request.add_scope(Scope::new(scope.clone()));
+        }
+
+        let (url, csrf_state) = auth_request.set_pkce_challenge(pkce_challenge).url();
+
+        Ok(AuthorizationRequest {
+            url: url.to_string(),
+            csrf_state: csrf_state.secret().to_string(),
+            pkce_verifier: Some(pkce_verifier.secret().to_string()),
+            nonce: None, // OAuth2 doesn't use nonce
+        })
     }
 
-    fn token_url(&self) -> &str {
-        &self.token_url
-    }
-
-    fn userinfo_url(&self) -> Option<&str> {
-        self.userinfo_url.as_deref()
-    }
-
-    fn scopes(&self) -> Vec<&str> {
-        self.scopes.iter().map(|s| s.as_str()).collect()
-    }
-
-    fn client_id(&self) -> &str {
-        &self.client_id
-    }
-
-    fn client_secret(&self) -> &str {
-        &self.client_secret
-    }
-
-    async fn normalize_profile(
+    async fn exchange_code(
         &self,
-        _http_client: &reqwest::Client,
-        _access_token: &str,
-        userinfo: Option<serde_json::Value>,
-    ) -> Result<User> {
-        let profile = userinfo.ok_or_else(|| {
-            Error::ProfileFetch("No userinfo response".to_string())
-        })?;
-        (self.normalize_profile)(profile)
+        redirect_url: &str,
+        code: &str,
+        pkce_verifier: Option<&str>,
+        _nonce: Option<&str>, // Ignored for OAuth2
+    ) -> Result<(User, String)> {
+        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
+            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
+            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
+            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
+            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Config(e.to_string()))?;
+
+        let mut token_request = client.exchange_code(AuthorizationCode::new(code.to_string()));
+
+        if let Some(verifier) = pkce_verifier {
+            token_request =
+                token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.to_string()));
+        }
+
+        let token_response = token_request
+            .request_async(&http_client)
+            .await
+            .map_err(|e| Error::TokenExchange(e.to_string()))?;
+
+        let access_token = token_response.access_token().secret().to_string();
+
+        // Fetch userinfo if endpoint exists
+        let userinfo = if let Some(url) = &self.userinfo_url {
+            let response = http_client
+                .get(url)
+                .bearer_auth(&access_token)
+                .header("User-Agent", "oauth-kit")
+                .send()
+                .await
+                .map_err(|e| Error::ProfileFetch(e.to_string()))?
+                .json()
+                .await
+                .map_err(|e| Error::ProfileFetch(e.to_string()))?;
+            Some(response)
+        } else {
+            None
+        };
+
+        let profile =
+            userinfo.ok_or_else(|| Error::ProfileFetch("No userinfo response".to_string()))?;
+        let user = (self.normalize_profile)(profile)?;
+
+        Ok((user, access_token))
     }
 }
 
@@ -139,11 +199,7 @@ pub struct OAuth2ProviderWithExtra {
     scopes: Vec<String>,
     client_id: String,
     client_secret: String,
-    normalize_profile: for<'a> fn(
-        &'a reqwest::Client,
-        &'a str,
-        Option<serde_json::Value>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<User>> + Send + 'a>>,
+    normalize_profile: AsyncProfileNormalizer,
 }
 
 impl OAuth2ProviderWithExtra {
@@ -157,11 +213,7 @@ impl OAuth2ProviderWithExtra {
         scopes: impl IntoIterator<Item = impl Into<String>>,
         client_id: impl Into<String>,
         client_secret: impl Into<String>,
-        normalize_profile: for<'a> fn(
-            &'a reqwest::Client,
-            &'a str,
-            Option<serde_json::Value>,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<User>> + Send + 'a>>,
+        normalize_profile: AsyncProfileNormalizer,
     ) -> Self {
         Self {
             id: id.into(),
@@ -211,43 +263,92 @@ impl super::OAuthProvider for OAuth2ProviderWithExtra {
         &self.name
     }
 
-    fn authorization_url(&self) -> &str {
-        &self.authorization_url
+    async fn authorization_url(&self, redirect_url: &str) -> Result<AuthorizationRequest> {
+        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
+            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
+            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
+            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
+            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+
+        let mut auth_request = client.authorize_url(CsrfToken::new_random);
+
+        for scope in &self.scopes {
+            auth_request = auth_request.add_scope(Scope::new(scope.clone()));
+        }
+
+        let (url, csrf_state) = auth_request.set_pkce_challenge(pkce_challenge).url();
+
+        Ok(AuthorizationRequest {
+            url: url.to_string(),
+            csrf_state: csrf_state.secret().to_string(),
+            pkce_verifier: Some(pkce_verifier.secret().to_string()),
+            nonce: None,
+        })
     }
 
-    fn token_url(&self) -> &str {
-        &self.token_url
-    }
-
-    fn userinfo_url(&self) -> Option<&str> {
-        self.userinfo_url.as_deref()
-    }
-
-    fn scopes(&self) -> Vec<&str> {
-        self.scopes.iter().map(|s| s.as_str()).collect()
-    }
-
-    fn client_id(&self) -> &str {
-        &self.client_id
-    }
-
-    fn client_secret(&self) -> &str {
-        &self.client_secret
-    }
-
-    async fn normalize_profile(
+    async fn exchange_code(
         &self,
-        http_client: &reqwest::Client,
-        access_token: &str,
-        userinfo: Option<serde_json::Value>,
-    ) -> Result<User> {
-        (self.normalize_profile)(http_client, access_token, userinfo).await
+        redirect_url: &str,
+        code: &str,
+        pkce_verifier: Option<&str>,
+        _nonce: Option<&str>,
+    ) -> Result<(User, String)> {
+        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
+            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
+            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
+            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
+            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::Config(e.to_string()))?;
+
+        let mut token_request = client.exchange_code(AuthorizationCode::new(code.to_string()));
+
+        if let Some(verifier) = pkce_verifier {
+            token_request =
+                token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.to_string()));
+        }
+
+        let token_response = token_request
+            .request_async(&http_client)
+            .await
+            .map_err(|e| Error::TokenExchange(e.to_string()))?;
+
+        let access_token = token_response.access_token().secret().to_string();
+
+        // Fetch userinfo if endpoint exists
+        let userinfo = if let Some(url) = &self.userinfo_url {
+            let response = http_client
+                .get(url)
+                .bearer_auth(&access_token)
+                .header("User-Agent", "oauth-kit")
+                .send()
+                .await
+                .map_err(|e| Error::ProfileFetch(e.to_string()))?
+                .json()
+                .await
+                .map_err(|e| Error::ProfileFetch(e.to_string()))?;
+            Some(response)
+        } else {
+            None
+        };
+
+        let user = (self.normalize_profile)(&http_client, &access_token, userinfo).await?;
+
+        Ok((user, access_token))
     }
 }
 
 /// Helper to extract a string field from JSON.
 pub fn json_string(value: &serde_json::Value, field: &str) -> Option<String> {
-    value.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
+    value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Helper to extract a string field, trying multiple field names.

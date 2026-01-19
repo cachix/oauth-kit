@@ -107,11 +107,11 @@ pub use error::{Error, Result};
 pub use store::UserStore;
 pub use user::User;
 
-pub use provider::{AuthorizationRequest, OAuthClient, OAuthProvider, ProviderRegistry};
+pub use provider::{AuthorizationRequest, OAuthProvider, ProviderRegistry};
 pub use provider::{OAuth2Provider, OAuth2ProviderWithExtra};
 
 #[cfg(feature = "oidc")]
-pub use provider::{OidcAuthorizationRequest, OidcProvider};
+pub use provider::OidcProvider;
 
 #[cfg(feature = "oidc")]
 pub use provider::providers;

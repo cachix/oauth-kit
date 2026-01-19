@@ -3,6 +3,7 @@
 //! This provider uses OIDC discovery to automatically configure endpoints
 //! and properly verifies ID tokens (signature, issuer, audience, expiry, nonce).
 
+use async_trait::async_trait;
 use openidconnect::{
     core::{CoreClient, CoreIdTokenClaims, CoreProviderMetadata, CoreResponseType},
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
@@ -13,6 +14,8 @@ use tokio::sync::OnceCell;
 use crate::error::{Error, Result};
 use crate::User;
 
+use super::AuthorizationRequest;
+
 /// Generic OIDC provider that works with any OpenID Connect compliant identity provider.
 ///
 /// Uses OIDC discovery to automatically configure endpoints from the issuer's
@@ -21,33 +24,16 @@ use crate::User;
 /// # Example
 ///
 /// ```rust,ignore
+/// use oauth_kit::provider::providers;
+///
+/// // Google
+/// let google = providers::google("client_id", "client_secret");
+///
 /// // Auth0
-/// let auth0 = OidcProvider::new(
-///     "https://your-tenant.auth0.com",
-///     "client_id",
-///     "client_secret",
-/// );
+/// let auth0 = providers::auth0("tenant.auth0.com", "client_id", "client_secret");
 ///
-/// // Okta
-/// let okta = OidcProvider::new(
-///     "https://your-org.okta.com",
-///     "client_id",
-///     "client_secret",
-/// );
-///
-/// // Keycloak
-/// let keycloak = OidcProvider::new(
-///     "https://keycloak.example.com/realms/myrealm",
-///     "client_id",
-///     "client_secret",
-/// );
-///
-/// // Azure AD
-/// let azure = OidcProvider::new(
-///     "https://login.microsoftonline.com/{tenant}/v2.0",
-///     "client_id",
-///     "client_secret",
-/// );
+/// // Generic OIDC
+/// let custom = providers::oidc("https://issuer.example.com", "client_id", "client_secret");
 /// ```
 pub struct OidcProvider {
     id: String,
@@ -63,6 +49,7 @@ impl OidcProvider {
     /// Create a new OIDC provider with the given issuer URL and credentials.
     ///
     /// The issuer URL should be the base URL of your identity provider, e.g.:
+    /// - Google: `https://accounts.google.com`
     /// - Auth0: `https://your-tenant.auth0.com`
     /// - Okta: `https://your-org.okta.com`
     /// - Keycloak: `https://keycloak.example.com/realms/myrealm`
@@ -111,6 +98,16 @@ impl OidcProvider {
         self
     }
 
+    /// Get the issuer URL.
+    pub fn issuer_url(&self) -> &str {
+        &self.issuer_url
+    }
+
+    /// Get the client ID.
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
     async fn get_provider_metadata(&self) -> Result<&CoreProviderMetadata> {
         self.discovery
             .get_or_try_init(|| async {
@@ -130,14 +127,112 @@ impl OidcProvider {
             .await
     }
 
-    /// Generate an authorization URL for the OIDC flow.
-    ///
-    /// Returns the URL to redirect the user to, along with state values that
-    /// must be stored in the session for verification during callback.
-    pub async fn authorization_url(
-        &self,
-        redirect_url: &str,
-    ) -> Result<OidcAuthorizationRequest> {
+    // Convenience constructors for common providers
+
+    /// Create a Google OIDC provider.
+    pub fn google(client_id: impl Into<String>, client_secret: impl Into<String>) -> Self {
+        Self::new("https://accounts.google.com", client_id, client_secret)
+            .with_id("google")
+            .with_name("Google")
+    }
+
+    /// Create an Auth0 provider.
+    pub fn auth0(
+        domain: impl AsRef<str>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            format!("https://{}", domain.as_ref()),
+            client_id,
+            client_secret,
+        )
+        .with_id("auth0")
+        .with_name("Auth0")
+    }
+
+    /// Create an Okta provider.
+    pub fn okta(
+        domain: impl AsRef<str>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            format!("https://{}", domain.as_ref()),
+            client_id,
+            client_secret,
+        )
+        .with_id("okta")
+        .with_name("Okta")
+    }
+
+    /// Create a Keycloak provider.
+    pub fn keycloak(
+        base_url: impl AsRef<str>,
+        realm: impl AsRef<str>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            format!(
+                "{}/realms/{}",
+                base_url.as_ref().trim_end_matches('/'),
+                realm.as_ref()
+            ),
+            client_id,
+            client_secret,
+        )
+        .with_id("keycloak")
+        .with_name("Keycloak")
+    }
+
+    /// Create an Azure AD / Microsoft Entra ID provider.
+    pub fn azure_ad(
+        tenant: impl AsRef<str>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            format!("https://login.microsoftonline.com/{}/v2.0", tenant.as_ref()),
+            client_id,
+            client_secret,
+        )
+        .with_id("azure")
+        .with_name("Microsoft")
+    }
+
+    /// Create an AWS Cognito provider.
+    pub fn cognito(
+        user_pool_id: impl AsRef<str>,
+        region: impl AsRef<str>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            format!(
+                "https://cognito-idp.{}.amazonaws.com/{}",
+                region.as_ref(),
+                user_pool_id.as_ref()
+            ),
+            client_id,
+            client_secret,
+        )
+        .with_id("cognito")
+        .with_name("Cognito")
+    }
+}
+
+#[async_trait]
+impl super::OAuthProvider for OidcProvider {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn authorization_url(&self, redirect_url: &str) -> Result<AuthorizationRequest> {
         let metadata = self.get_provider_metadata().await?;
 
         let client = CoreClient::from_provider_metadata(
@@ -146,8 +241,7 @@ impl OidcProvider {
             Some(ClientSecret::new(self.client_secret.clone())),
         )
         .set_redirect_uri(
-            RedirectUrl::new(redirect_url.to_string())
-                .map_err(|e| Error::Config(e.to_string()))?,
+            RedirectUrl::new(redirect_url.to_string()).map_err(|e| Error::Config(e.to_string()))?,
         );
 
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -164,24 +258,26 @@ impl OidcProvider {
 
         let (url, csrf_state, nonce) = auth_request.set_pkce_challenge(pkce_challenge).url();
 
-        Ok(OidcAuthorizationRequest {
+        Ok(AuthorizationRequest {
             url: url.to_string(),
             csrf_state: csrf_state.secret().to_string(),
-            nonce: nonce.secret().to_string(),
-            pkce_verifier: pkce_verifier.secret().to_string(),
+            pkce_verifier: Some(pkce_verifier.secret().to_string()),
+            nonce: Some(nonce.secret().to_string()),
         })
     }
 
-    /// Exchange an authorization code for user information.
-    ///
-    /// This verifies the ID token signature, issuer, audience, expiry, and nonce.
-    pub async fn exchange_code(
+    async fn exchange_code(
         &self,
         redirect_url: &str,
         code: &str,
-        nonce: &str,
-        pkce_verifier: &str,
+        pkce_verifier: Option<&str>,
+        nonce: Option<&str>,
     ) -> Result<(User, String)> {
+        let nonce = nonce
+            .ok_or_else(|| Error::TokenExchange("Missing nonce for OIDC provider".to_string()))?;
+        let pkce_verifier = pkce_verifier
+            .ok_or_else(|| Error::TokenExchange("Missing PKCE verifier".to_string()))?;
+
         let metadata = self.get_provider_metadata().await?;
 
         let client = CoreClient::from_provider_metadata(
@@ -190,8 +286,7 @@ impl OidcProvider {
             Some(ClientSecret::new(self.client_secret.clone())),
         )
         .set_redirect_uri(
-            RedirectUrl::new(redirect_url.to_string())
-                .map_err(|e| Error::Config(e.to_string()))?,
+            RedirectUrl::new(redirect_url.to_string()).map_err(|e| Error::Config(e.to_string()))?,
         );
 
         let http_client = oauth2::reqwest::ClientBuilder::new()
@@ -222,26 +317,6 @@ impl OidcProvider {
 
         Ok((user, access_token))
     }
-
-    /// Provider ID for routing.
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Human-readable provider name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Client ID.
-    pub fn client_id(&self) -> &str {
-        &self.client_id
-    }
-
-    /// Issuer URL.
-    pub fn issuer_url(&self) -> &str {
-        &self.issuer_url
-    }
 }
 
 fn user_from_claims(claims: &CoreIdTokenClaims) -> Result<User> {
@@ -259,151 +334,4 @@ fn user_from_claims(claims: &CoreIdTokenClaims) -> Result<User> {
             .map(|p| p.to_string()),
         raw: serde_json::to_value(claims).unwrap_or_default(),
     })
-}
-
-/// Authorization request data for OIDC flow.
-///
-/// Store these values in the session during the authorization redirect,
-/// then use them to verify the callback and exchange the code.
-pub struct OidcAuthorizationRequest {
-    /// URL to redirect the user to for authorization.
-    pub url: String,
-    /// CSRF state token - verify this matches in the callback.
-    pub csrf_state: String,
-    /// Nonce for ID token replay protection - pass to `exchange_code`.
-    pub nonce: String,
-    /// PKCE verifier - pass to `exchange_code`.
-    pub pkce_verifier: String,
-}
-
-// Convenience constructors for common providers
-
-impl OidcProvider {
-    /// Create an Auth0 provider.
-    ///
-    /// # Arguments
-    /// * `domain` - Your Auth0 domain (e.g., "your-tenant.auth0.com")
-    pub fn auth0(
-        domain: impl AsRef<str>,
-        client_id: impl Into<String>,
-        client_secret: impl Into<String>,
-    ) -> Self {
-        Self::new(
-            format!("https://{}", domain.as_ref()),
-            client_id,
-            client_secret,
-        )
-        .with_id("auth0")
-        .with_name("Auth0")
-    }
-
-    /// Create an Auth0 provider from environment variables.
-    ///
-    /// Reads `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET`.
-    pub fn auth0_from_env() -> Result<Self> {
-        let domain = std::env::var("AUTH0_DOMAIN")
-            .map_err(|_| Error::Config("AUTH0_DOMAIN not set".to_string()))?;
-        let client_id = std::env::var("AUTH0_CLIENT_ID")
-            .map_err(|_| Error::Config("AUTH0_CLIENT_ID not set".to_string()))?;
-        let client_secret = std::env::var("AUTH0_CLIENT_SECRET")
-            .map_err(|_| Error::Config("AUTH0_CLIENT_SECRET not set".to_string()))?;
-        Ok(Self::auth0(domain, client_id, client_secret))
-    }
-
-    /// Create an Okta provider.
-    ///
-    /// # Arguments
-    /// * `domain` - Your Okta domain (e.g., "your-org.okta.com")
-    pub fn okta(
-        domain: impl AsRef<str>,
-        client_id: impl Into<String>,
-        client_secret: impl Into<String>,
-    ) -> Self {
-        Self::new(
-            format!("https://{}", domain.as_ref()),
-            client_id,
-            client_secret,
-        )
-        .with_id("okta")
-        .with_name("Okta")
-    }
-
-    /// Create an Okta provider from environment variables.
-    ///
-    /// Reads `OKTA_DOMAIN`, `OKTA_CLIENT_ID`, and `OKTA_CLIENT_SECRET`.
-    pub fn okta_from_env() -> Result<Self> {
-        let domain = std::env::var("OKTA_DOMAIN")
-            .map_err(|_| Error::Config("OKTA_DOMAIN not set".to_string()))?;
-        let client_id = std::env::var("OKTA_CLIENT_ID")
-            .map_err(|_| Error::Config("OKTA_CLIENT_ID not set".to_string()))?;
-        let client_secret = std::env::var("OKTA_CLIENT_SECRET")
-            .map_err(|_| Error::Config("OKTA_CLIENT_SECRET not set".to_string()))?;
-        Ok(Self::okta(domain, client_id, client_secret))
-    }
-
-    /// Create a Keycloak provider.
-    ///
-    /// # Arguments
-    /// * `base_url` - Keycloak base URL (e.g., "https://keycloak.example.com")
-    /// * `realm` - Keycloak realm name
-    pub fn keycloak(
-        base_url: impl AsRef<str>,
-        realm: impl AsRef<str>,
-        client_id: impl Into<String>,
-        client_secret: impl Into<String>,
-    ) -> Self {
-        Self::new(
-            format!("{}/realms/{}", base_url.as_ref().trim_end_matches('/'), realm.as_ref()),
-            client_id,
-            client_secret,
-        )
-        .with_id("keycloak")
-        .with_name("Keycloak")
-    }
-
-    /// Create a Keycloak provider from environment variables.
-    ///
-    /// Reads `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`, and `KEYCLOAK_CLIENT_SECRET`.
-    pub fn keycloak_from_env() -> Result<Self> {
-        let base_url = std::env::var("KEYCLOAK_URL")
-            .map_err(|_| Error::Config("KEYCLOAK_URL not set".to_string()))?;
-        let realm = std::env::var("KEYCLOAK_REALM")
-            .map_err(|_| Error::Config("KEYCLOAK_REALM not set".to_string()))?;
-        let client_id = std::env::var("KEYCLOAK_CLIENT_ID")
-            .map_err(|_| Error::Config("KEYCLOAK_CLIENT_ID not set".to_string()))?;
-        let client_secret = std::env::var("KEYCLOAK_CLIENT_SECRET")
-            .map_err(|_| Error::Config("KEYCLOAK_CLIENT_SECRET not set".to_string()))?;
-        Ok(Self::keycloak(base_url, realm, client_id, client_secret))
-    }
-
-    /// Create an Azure AD provider.
-    ///
-    /// # Arguments
-    /// * `tenant` - Azure AD tenant ID or "common" for multi-tenant
-    pub fn azure_ad(
-        tenant: impl AsRef<str>,
-        client_id: impl Into<String>,
-        client_secret: impl Into<String>,
-    ) -> Self {
-        Self::new(
-            format!("https://login.microsoftonline.com/{}/v2.0", tenant.as_ref()),
-            client_id,
-            client_secret,
-        )
-        .with_id("azure")
-        .with_name("Microsoft")
-    }
-
-    /// Create an Azure AD provider from environment variables.
-    ///
-    /// Reads `AZURE_AD_TENANT`, `AZURE_AD_CLIENT_ID`, and `AZURE_AD_CLIENT_SECRET`.
-    pub fn azure_ad_from_env() -> Result<Self> {
-        let tenant = std::env::var("AZURE_AD_TENANT")
-            .map_err(|_| Error::Config("AZURE_AD_TENANT not set".to_string()))?;
-        let client_id = std::env::var("AZURE_AD_CLIENT_ID")
-            .map_err(|_| Error::Config("AZURE_AD_CLIENT_ID not set".to_string()))?;
-        let client_secret = std::env::var("AZURE_AD_CLIENT_SECRET")
-            .map_err(|_| Error::Config("AZURE_AD_CLIENT_SECRET not set".to_string()))?;
-        Ok(Self::azure_ad(tenant, client_id, client_secret))
-    }
 }

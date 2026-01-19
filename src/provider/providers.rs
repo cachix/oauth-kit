@@ -10,7 +10,9 @@
 use crate::error::{Error, Result};
 use crate::User;
 
-use super::oauth2_provider::{json_bool, json_string, json_string_any, fetch_json, OAuth2Provider, OAuth2ProviderWithExtra};
+use super::oauth2_provider::{
+    fetch_json, json_bool, json_string, json_string_any, OAuth2Provider, OAuth2ProviderWithExtra,
+};
 use super::oidc::OidcProvider;
 
 // ============================================================================
@@ -44,9 +46,15 @@ pub fn auth0(
     OidcProvider::auth0(domain, client_id, client_secret)
 }
 
-/// Auth0 from environment variables
+/// Auth0 from environment variables (AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET)
 pub fn auth0_from_env() -> Result<OidcProvider> {
-    OidcProvider::auth0_from_env()
+    let domain = std::env::var("AUTH0_DOMAIN")
+        .map_err(|_| Error::Config("AUTH0_DOMAIN not set".to_string()))?;
+    let client_id = std::env::var("AUTH0_CLIENT_ID")
+        .map_err(|_| Error::Config("AUTH0_CLIENT_ID not set".to_string()))?;
+    let client_secret = std::env::var("AUTH0_CLIENT_SECRET")
+        .map_err(|_| Error::Config("AUTH0_CLIENT_SECRET not set".to_string()))?;
+    Ok(auth0(domain, client_id, client_secret))
 }
 
 /// Okta - OIDC provider
@@ -58,9 +66,15 @@ pub fn okta(
     OidcProvider::okta(domain, client_id, client_secret)
 }
 
-/// Okta from environment variables
+/// Okta from environment variables (OKTA_DOMAIN, OKTA_CLIENT_ID, OKTA_CLIENT_SECRET)
 pub fn okta_from_env() -> Result<OidcProvider> {
-    OidcProvider::okta_from_env()
+    let domain = std::env::var("OKTA_DOMAIN")
+        .map_err(|_| Error::Config("OKTA_DOMAIN not set".to_string()))?;
+    let client_id = std::env::var("OKTA_CLIENT_ID")
+        .map_err(|_| Error::Config("OKTA_CLIENT_ID not set".to_string()))?;
+    let client_secret = std::env::var("OKTA_CLIENT_SECRET")
+        .map_err(|_| Error::Config("OKTA_CLIENT_SECRET not set".to_string()))?;
+    Ok(okta(domain, client_id, client_secret))
 }
 
 /// Keycloak - OIDC provider
@@ -73,9 +87,17 @@ pub fn keycloak(
     OidcProvider::keycloak(base_url, realm, client_id, client_secret)
 }
 
-/// Keycloak from environment variables
+/// Keycloak from environment variables (KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET)
 pub fn keycloak_from_env() -> Result<OidcProvider> {
-    OidcProvider::keycloak_from_env()
+    let base_url = std::env::var("KEYCLOAK_URL")
+        .map_err(|_| Error::Config("KEYCLOAK_URL not set".to_string()))?;
+    let realm = std::env::var("KEYCLOAK_REALM")
+        .map_err(|_| Error::Config("KEYCLOAK_REALM not set".to_string()))?;
+    let client_id = std::env::var("KEYCLOAK_CLIENT_ID")
+        .map_err(|_| Error::Config("KEYCLOAK_CLIENT_ID not set".to_string()))?;
+    let client_secret = std::env::var("KEYCLOAK_CLIENT_SECRET")
+        .map_err(|_| Error::Config("KEYCLOAK_CLIENT_SECRET not set".to_string()))?;
+    Ok(keycloak(base_url, realm, client_id, client_secret))
 }
 
 /// Azure AD / Microsoft Entra ID - OIDC provider
@@ -87,9 +109,15 @@ pub fn azure_ad(
     OidcProvider::azure_ad(tenant, client_id, client_secret)
 }
 
-/// Azure AD from environment variables
+/// Azure AD from environment variables (AZURE_AD_TENANT, AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET)
 pub fn azure_ad_from_env() -> Result<OidcProvider> {
-    OidcProvider::azure_ad_from_env()
+    let tenant = std::env::var("AZURE_AD_TENANT")
+        .map_err(|_| Error::Config("AZURE_AD_TENANT not set".to_string()))?;
+    let client_id = std::env::var("AZURE_AD_CLIENT_ID")
+        .map_err(|_| Error::Config("AZURE_AD_CLIENT_ID not set".to_string()))?;
+    let client_secret = std::env::var("AZURE_AD_CLIENT_SECRET")
+        .map_err(|_| Error::Config("AZURE_AD_CLIENT_SECRET not set".to_string()))?;
+    Ok(azure_ad(tenant, client_id, client_secret))
 }
 
 /// Microsoft Entra ID (same as Azure AD)
@@ -140,7 +168,13 @@ pub fn fusionauth(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!("https://{}", domain.as_ref().trim_start_matches("https://").trim_start_matches("http://"));
+    let issuer = format!(
+        "https://{}",
+        domain
+            .as_ref()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+    );
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("fusionauth")
         .with_name("FusionAuth")
@@ -154,7 +188,10 @@ pub fn authentik(
 ) -> OidcProvider {
     let issuer = format!(
         "https://{}/application/o/{}",
-        domain.as_ref().trim_start_matches("https://").trim_start_matches("http://"),
+        domain
+            .as_ref()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://"),
         "default" // application slug
     );
     OidcProvider::new(issuer, client_id, client_secret)
@@ -180,7 +217,13 @@ pub fn zitadel(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!("https://{}", domain.as_ref().trim_start_matches("https://").trim_start_matches("http://"));
+    let issuer = format!(
+        "https://{}",
+        domain
+            .as_ref()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+    );
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("zitadel")
         .with_name("Zitadel")
@@ -192,7 +235,13 @@ pub fn logto(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!("https://{}/oidc", domain.as_ref().trim_start_matches("https://").trim_start_matches("http://"));
+    let issuer = format!(
+        "https://{}/oidc",
+        domain
+            .as_ref()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+    );
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("logto")
         .with_name("Logto")
@@ -204,7 +253,13 @@ pub fn kinde(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!("https://{}", domain.as_ref().trim_start_matches("https://").trim_start_matches("http://"));
+    let issuer = format!(
+        "https://{}",
+        domain
+            .as_ref()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+    );
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("kinde")
         .with_name("Kinde")
@@ -223,10 +278,7 @@ pub fn descope(
 }
 
 /// WorkOS - OIDC provider
-pub fn workos(
-    client_id: impl Into<String>,
-    client_secret: impl Into<String>,
-) -> OidcProvider {
+pub fn workos(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
     OidcProvider::new("https://api.workos.com", client_id, client_secret)
         .with_id("workos")
         .with_name("WorkOS")
@@ -248,7 +300,10 @@ pub fn oidc(
 // User profile is fetched from a separate userinfo endpoint.
 
 /// GitHub - OAuth2 provider
-pub fn github(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2ProviderWithExtra {
+pub fn github(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2ProviderWithExtra {
     OAuth2ProviderWithExtra::new(
         "github",
         "GitHub",
@@ -280,8 +335,10 @@ async fn normalize_github(
 
     // GitHub requires separate API call for email if not public
     let email = if json_string(&profile, "email").is_none() {
-        let emails: Vec<serde_json::Value> = fetch_json(client, "https://api.github.com/user/emails", access_token).await?;
-        emails.iter()
+        let emails: Vec<serde_json::Value> =
+            fetch_json(client, "https://api.github.com/user/emails", access_token).await?;
+        emails
+            .iter()
             .find(|e| e.get("primary").and_then(|v| v.as_bool()).unwrap_or(false))
             .and_then(|e| json_string(e, "email"))
     } else {
@@ -289,7 +346,10 @@ async fn normalize_github(
     };
 
     Ok(User {
-        id: profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .unwrap_or_else(|| json_string(&profile, "login").unwrap_or_default()),
         email,
         email_verified: true, // GitHub verifies emails
@@ -336,7 +396,10 @@ pub fn gitlab_with_url(
 
 fn normalize_gitlab(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .unwrap_or_else(|| json_string(&profile, "username").unwrap_or_default()),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "confirmed_at").is_some(),
@@ -382,8 +445,7 @@ fn normalize_discord(profile: serde_json::Value) -> Result<User> {
         id: id.clone(),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "verified").unwrap_or(false),
-        name: json_string(&profile, "global_name")
-            .or_else(|| json_string(&profile, "username")),
+        name: json_string(&profile, "global_name").or_else(|| json_string(&profile, "username")),
         image,
         raw: profile,
     })
@@ -406,7 +468,9 @@ pub fn spotify(client_id: impl Into<String>, client_secret: impl Into<String>) -
 
 fn normalize_spotify(profile: serde_json::Value) -> Result<User> {
     let images = profile.get("images").and_then(|v| v.as_array());
-    let image = images.and_then(|arr| arr.first()).and_then(|img| json_string(img, "url"));
+    let image = images
+        .and_then(|arr| arr.first())
+        .and_then(|img| json_string(img, "url"));
 
     Ok(User {
         id: json_string(&profile, "id").unwrap_or_default(),
@@ -418,93 +482,26 @@ fn normalize_spotify(profile: serde_json::Value) -> Result<User> {
     })
 }
 
-/// Twitch - OAuth2 provider
-pub fn twitch(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
-    OAuth2Provider::new(
-        "twitch",
-        "Twitch",
-        "https://id.twitch.tv/oauth2/authorize",
-        "https://id.twitch.tv/oauth2/token",
-        Some("https://api.twitch.tv/helix/users"),
-        vec!["user:read:email"],
-        client_id,
-        client_secret,
-        normalize_twitch,
-    )
+/// Twitch - OIDC provider
+pub fn twitch(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://id.twitch.tv/oauth2", client_id, client_secret)
+        .with_id("twitch")
+        .with_name("Twitch")
+        .with_scopes(vec!["openid".to_string(), "user:read:email".to_string()])
 }
 
-fn normalize_twitch(profile: serde_json::Value) -> Result<User> {
-    // Twitch returns { data: [user] }
-    let user = profile.get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|arr| arr.first())
-        .cloned()
-        .unwrap_or(profile.clone());
-
-    Ok(User {
-        id: json_string(&user, "id").unwrap_or_default(),
-        email: json_string(&user, "email"),
-        email_verified: true,
-        name: json_string(&user, "display_name").or_else(|| json_string(&user, "login")),
-        image: json_string(&user, "profile_image_url"),
-        raw: profile,
-    })
+/// Slack - OIDC provider
+pub fn slack(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://slack.com", client_id, client_secret)
+        .with_id("slack")
+        .with_name("Slack")
 }
 
-/// Slack - OAuth2 provider
-pub fn slack(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
-    OAuth2Provider::new(
-        "slack",
-        "Slack",
-        "https://slack.com/oauth/v2/authorize",
-        "https://slack.com/api/oauth.v2.access",
-        Some("https://slack.com/api/users.identity"),
-        vec!["identity.basic", "identity.email", "identity.avatar"],
-        client_id,
-        client_secret,
-        normalize_slack,
-    )
-}
-
-fn normalize_slack(profile: serde_json::Value) -> Result<User> {
-    let user = profile.get("user").cloned().unwrap_or(profile.clone());
-
-    Ok(User {
-        id: json_string(&user, "id").unwrap_or_default(),
-        email: json_string(&user, "email"),
-        email_verified: json_bool(&user, "email_verified").unwrap_or(false),
-        name: json_string(&user, "name"),
-        image: json_string(&user, "image_512")
-            .or_else(|| json_string(&user, "image_192"))
-            .or_else(|| json_string(&user, "image_72")),
-        raw: profile,
-    })
-}
-
-/// LinkedIn - OAuth2 provider (v2 API)
-pub fn linkedin(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
-    OAuth2Provider::new(
-        "linkedin",
-        "LinkedIn",
-        "https://www.linkedin.com/oauth/v2/authorization",
-        "https://www.linkedin.com/oauth/v2/accessToken",
-        Some("https://api.linkedin.com/v2/userinfo"),
-        vec!["openid", "profile", "email"],
-        client_id,
-        client_secret,
-        normalize_linkedin,
-    )
-}
-
-fn normalize_linkedin(profile: serde_json::Value) -> Result<User> {
-    Ok(User {
-        id: json_string(&profile, "sub").unwrap_or_default(),
-        email: json_string(&profile, "email"),
-        email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
-        name: json_string(&profile, "name"),
-        image: json_string(&profile, "picture"),
-        raw: profile,
-    })
+/// LinkedIn - OIDC provider
+pub fn linkedin(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://www.linkedin.com/oauth", client_id, client_secret)
+        .with_id("linkedin")
+        .with_name("LinkedIn")
 }
 
 /// Facebook - OAuth2 provider
@@ -512,10 +509,10 @@ pub fn facebook(client_id: impl Into<String>, client_secret: impl Into<String>) 
     OAuth2Provider::new(
         "facebook",
         "Facebook",
-        "https://www.facebook.com/v18.0/dialog/oauth",
-        "https://graph.facebook.com/v18.0/oauth/access_token",
+        "https://www.facebook.com/v19.0/dialog/oauth",
+        "https://graph.facebook.com/oauth/access_token",
         Some("https://graph.facebook.com/me?fields=id,name,email,picture"),
-        vec!["email", "public_profile"],
+        vec!["email"],
         client_id,
         client_secret,
         normalize_facebook,
@@ -523,7 +520,8 @@ pub fn facebook(client_id: impl Into<String>, client_secret: impl Into<String>) 
 }
 
 fn normalize_facebook(profile: serde_json::Value) -> Result<User> {
-    let picture = profile.get("picture")
+    let picture = profile
+        .get("picture")
         .and_then(|p| p.get("data"))
         .and_then(|d| json_string(d, "url"));
 
@@ -541,11 +539,11 @@ fn normalize_facebook(profile: serde_json::Value) -> Result<User> {
 pub fn twitter(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
     OAuth2Provider::new(
         "twitter",
-        "Twitter",
-        "https://twitter.com/i/oauth2/authorize",
-        "https://api.twitter.com/2/oauth2/token",
-        Some("https://api.twitter.com/2/users/me?user.fields=profile_image_url"),
-        vec!["users.read", "tweet.read"],
+        "X",
+        "https://x.com/i/oauth2/authorize",
+        "https://api.x.com/2/oauth2/token",
+        Some("https://api.x.com/2/users/me?user.fields=profile_image_url"),
+        vec!["users.read", "tweet.read", "offline.access"],
         client_id,
         client_secret,
         normalize_twitter,
@@ -609,7 +607,9 @@ pub fn bitbucket(client_id: impl Into<String>, client_secret: impl Into<String>)
 
 fn normalize_bitbucket(profile: serde_json::Value) -> Result<User> {
     let links = profile.get("links");
-    let avatar = links.and_then(|l| l.get("avatar")).and_then(|a| json_string(a, "href"));
+    let avatar = links
+        .and_then(|l| l.get("avatar"))
+        .and_then(|a| json_string(a, "href"));
 
     Ok(User {
         id: json_string(&profile, "uuid").unwrap_or_default(),
@@ -699,7 +699,8 @@ fn normalize_notion(profile: serde_json::Value) -> Result<User> {
     Ok(User {
         id: json_string(&user, "id").unwrap_or_default(),
         email: json_string(&user, "person").and_then(|_| {
-            profile.get("owner")
+            profile
+                .get("owner")
                 .and_then(|o| o.get("user"))
                 .and_then(|u| u.get("person"))
                 .and_then(|p| json_string(p, "email"))
@@ -717,9 +718,9 @@ pub fn figma(client_id: impl Into<String>, client_secret: impl Into<String>) -> 
         "figma",
         "Figma",
         "https://www.figma.com/oauth",
-        "https://www.figma.com/api/oauth/token",
+        "https://api.figma.com/v1/oauth/token",
         Some("https://api.figma.com/v1/me"),
-        vec!["file_read"],
+        vec!["files:read"],
         client_id,
         client_secret,
         normalize_figma,
@@ -768,8 +769,8 @@ pub fn strava(client_id: impl Into<String>, client_secret: impl Into<String>) ->
     OAuth2Provider::new(
         "strava",
         "Strava",
-        "https://www.strava.com/oauth/authorize",
-        "https://www.strava.com/oauth/token",
+        "https://www.strava.com/api/v3/oauth/authorize",
+        "https://www.strava.com/api/v3/oauth/token",
         Some("https://www.strava.com/api/v3/athlete"),
         vec!["read"],
         client_id,
@@ -788,7 +789,11 @@ fn normalize_strava(profile: serde_json::Value) -> Result<User> {
     };
 
     Ok(User {
-        id: profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string()).unwrap_or_default(),
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: true,
         name,
@@ -826,8 +831,8 @@ fn normalize_patreon(profile: serde_json::Value) -> Result<User> {
     })
 }
 
-/// Battle.net - OAuth2 provider
-pub fn battlenet(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+/// Battle.net - OIDC provider (defaults to US region)
+pub fn battlenet(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
     battlenet_region("us", client_id, client_secret)
 }
 
@@ -836,62 +841,25 @@ pub fn battlenet_region(
     region: &str,
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
-) -> OAuth2Provider {
-    let (auth_host, api_host) = match region {
-        "cn" => ("www.battlenet.com.cn", "gateway.battlenet.com.cn"),
-        _ => ("oauth.battle.net", "oauth.battle.net"),
+) -> OidcProvider {
+    let issuer = match region {
+        "cn" => "https://www.battlenet.com.cn/oauth",
+        "eu" => "https://eu.battle.net/oauth",
+        "kr" => "https://kr.battle.net/oauth",
+        "tw" => "https://tw.battle.net/oauth",
+        _ => "https://oauth.battle.net", // US default
     };
 
-    OAuth2Provider::new(
-        "battlenet",
-        "Battle.net",
-        format!("https://{}/authorize", auth_host),
-        format!("https://{}/token", auth_host),
-        Some(format!("https://{}/userinfo", api_host)),
-        ["openid"],
-        client_id,
-        client_secret,
-        normalize_battlenet,
-    )
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("battlenet")
+        .with_name("Battle.net")
 }
 
-fn normalize_battlenet(profile: serde_json::Value) -> Result<User> {
-    Ok(User {
-        id: json_string(&profile, "sub")
-            .or_else(|| profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string()))
-            .unwrap_or_default(),
-        email: None,
-        email_verified: false,
-        name: json_string(&profile, "battletag"),
-        image: None,
-        raw: profile,
-    })
-}
-
-/// Line - OAuth2 provider
-pub fn line(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
-    OAuth2Provider::new(
-        "line",
-        "LINE",
-        "https://access.line.me/oauth2/v2.1/authorize",
-        "https://api.line.me/oauth2/v2.1/token",
-        Some("https://api.line.me/v2/profile"),
-        vec!["profile", "openid", "email"],
-        client_id,
-        client_secret,
-        normalize_line,
-    )
-}
-
-fn normalize_line(profile: serde_json::Value) -> Result<User> {
-    Ok(User {
-        id: json_string(&profile, "userId").unwrap_or_default(),
-        email: json_string(&profile, "email"),
-        email_verified: true,
-        name: json_string(&profile, "displayName"),
-        image: json_string(&profile, "pictureUrl"),
-        raw: profile,
-    })
+/// LINE - OIDC provider
+pub fn line(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://access.line.me", client_id, client_secret)
+        .with_id("line")
+        .with_name("LINE")
 }
 
 /// Kakao - OAuth2 provider
@@ -914,9 +882,15 @@ fn normalize_kakao(profile: serde_json::Value) -> Result<User> {
     let kakao_profile = kakao_account.and_then(|a| a.get("profile"));
 
     Ok(User {
-        id: profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string()).unwrap_or_default(),
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         email: kakao_account.and_then(|a| json_string(a, "email")),
-        email_verified: kakao_account.and_then(|a| json_bool(a, "is_email_verified")).unwrap_or(false),
+        email_verified: kakao_account
+            .and_then(|a| json_bool(a, "is_email_verified"))
+            .unwrap_or(false),
         name: kakao_profile.and_then(|p| json_string(p, "nickname")),
         image: kakao_profile.and_then(|p| json_string(p, "profile_image_url")),
         raw: profile,
@@ -967,7 +941,8 @@ pub fn vk(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAu
 }
 
 fn normalize_vk(profile: serde_json::Value) -> Result<User> {
-    let response = profile.get("response")
+    let response = profile
+        .get("response")
         .and_then(|r| r.as_array())
         .and_then(|arr| arr.first())
         .cloned()
@@ -982,7 +957,11 @@ fn normalize_vk(profile: serde_json::Value) -> Result<User> {
     };
 
     Ok(User {
-        id: response.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string()).unwrap_or_default(),
+        id: response
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         email: json_string(&profile, "email"), // Email comes from token response
         email_verified: true,
         name,
@@ -996,9 +975,9 @@ pub fn yandex(client_id: impl Into<String>, client_secret: impl Into<String>) ->
     OAuth2Provider::new(
         "yandex",
         "Yandex",
-        "https://oauth.yandex.com/authorize",
-        "https://oauth.yandex.com/token",
-        Some("https://login.yandex.ru/info"),
+        "https://oauth.yandex.ru/authorize",
+        "https://oauth.yandex.ru/token",
+        Some("https://login.yandex.ru/info?format=json"),
         vec!["login:email", "login:info", "login:avatar"],
         client_id,
         client_secret,
@@ -1008,7 +987,8 @@ pub fn yandex(client_id: impl Into<String>, client_secret: impl Into<String>) ->
 
 fn normalize_yandex(profile: serde_json::Value) -> Result<User> {
     let avatar_id = json_string(&profile, "default_avatar_id");
-    let image = avatar_id.map(|id| format!("https://avatars.yandex.net/get-yapic/{}/islands-200", id));
+    let image =
+        avatar_id.map(|id| format!("https://avatars.yandex.net/get-yapic/{}/islands-200", id));
 
     Ok(User {
         id: json_string(&profile, "id").unwrap_or_default(),
@@ -1025,8 +1005,8 @@ pub fn coinbase(client_id: impl Into<String>, client_secret: impl Into<String>) 
     OAuth2Provider::new(
         "coinbase",
         "Coinbase",
-        "https://www.coinbase.com/oauth/authorize",
-        "https://api.coinbase.com/oauth/token",
+        "https://login.coinbase.com/oauth2/auth",
+        "https://login.coinbase.com/oauth2/token",
         Some("https://api.coinbase.com/v2/user"),
         vec!["wallet:user:read", "wallet:user:email"],
         client_id,
@@ -1049,7 +1029,10 @@ fn normalize_coinbase(profile: serde_json::Value) -> Result<User> {
 }
 
 /// Box - OAuth2 provider
-pub fn box_provider(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+pub fn box_provider(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
     OAuth2Provider::new(
         "box",
         "Box",
@@ -1144,7 +1127,10 @@ pub fn tiktok(client_id: impl Into<String>, client_secret: impl Into<String>) ->
 }
 
 fn normalize_tiktok(profile: serde_json::Value) -> Result<User> {
-    let data = profile.get("data").and_then(|d| d.get("user")).cloned()
+    let data = profile
+        .get("data")
+        .and_then(|d| d.get("user"))
+        .cloned()
         .unwrap_or(profile.clone());
 
     Ok(User {
@@ -1157,32 +1143,11 @@ fn normalize_tiktok(profile: serde_json::Value) -> Result<User> {
     })
 }
 
-/// Salesforce - OAuth2 provider
-pub fn salesforce(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
-    OAuth2Provider::new(
-        "salesforce",
-        "Salesforce",
-        "https://login.salesforce.com/services/oauth2/authorize",
-        "https://login.salesforce.com/services/oauth2/token",
-        Some("https://login.salesforce.com/services/oauth2/userinfo"),
-        vec!["openid", "profile", "email"],
-        client_id,
-        client_secret,
-        normalize_salesforce,
-    )
-}
-
-fn normalize_salesforce(profile: serde_json::Value) -> Result<User> {
-    Ok(User {
-        id: json_string(&profile, "user_id")
-            .or_else(|| json_string(&profile, "sub"))
-            .unwrap_or_default(),
-        email: json_string(&profile, "email"),
-        email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
-        name: json_string(&profile, "name"),
-        image: json_string(&profile, "picture"),
-        raw: profile,
-    })
+/// Salesforce - OIDC provider
+pub fn salesforce(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://login.salesforce.com", client_id, client_secret)
+        .with_id("salesforce")
+        .with_name("Salesforce")
 }
 
 /// Zoho - OAuth2 provider
@@ -1205,16 +1170,15 @@ fn normalize_zoho(profile: serde_json::Value) -> Result<User> {
         id: json_string(&profile, "ZUID").unwrap_or_default(),
         email: json_string(&profile, "Email"),
         email_verified: true,
-        name: json_string(&profile, "Display_Name")
-            .or_else(|| {
-                let first = json_string(&profile, "First_Name").unwrap_or_default();
-                let last = json_string(&profile, "Last_Name").unwrap_or_default();
-                if !first.is_empty() || !last.is_empty() {
-                    Some(format!("{} {}", first, last).trim().to_string())
-                } else {
-                    None
-                }
-            }),
+        name: json_string(&profile, "Display_Name").or_else(|| {
+            let first = json_string(&profile, "First_Name").unwrap_or_default();
+            let last = json_string(&profile, "Last_Name").unwrap_or_default();
+            if !first.is_empty() || !last.is_empty() {
+                Some(format!("{} {}", first, last).trim().to_string())
+            } else {
+                None
+            }
+        }),
         image: None,
         raw: profile,
     })
@@ -1237,7 +1201,10 @@ pub fn webex(client_id: impl Into<String>, client_secret: impl Into<String>) -> 
 
 fn normalize_webex(profile: serde_json::Value) -> Result<User> {
     let emails = profile.get("emails").and_then(|e| e.as_array());
-    let email = emails.and_then(|arr| arr.first()).and_then(|e| e.as_str()).map(|s| s.to_string());
+    let email = emails
+        .and_then(|arr| arr.first())
+        .and_then(|e| e.as_str())
+        .map(|s| s.to_string());
 
     Ok(User {
         id: json_string(&profile, "id").unwrap_or_default(),
@@ -1292,7 +1259,11 @@ pub fn osu(client_id: impl Into<String>, client_secret: impl Into<String>) -> OA
 
 fn normalize_osu(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string()).unwrap_or_default(),
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         email: None,
         email_verified: false,
         name: json_string(&profile, "username"),
@@ -1318,10 +1289,18 @@ pub fn eveonline(client_id: impl Into<String>, client_secret: impl Into<String>)
 
 fn normalize_eveonline(profile: serde_json::Value) -> Result<User> {
     let character_id = json_string(&profile, "CharacterID")
-        .or_else(|| profile.get("CharacterID").and_then(|v| v.as_i64()).map(|id| id.to_string()))
+        .or_else(|| {
+            profile
+                .get("CharacterID")
+                .and_then(|v| v.as_i64())
+                .map(|id| id.to_string())
+        })
         .unwrap_or_default();
     let image = if !character_id.is_empty() {
-        Some(format!("https://images.evetech.net/characters/{}/portrait", character_id))
+        Some(format!(
+            "https://images.evetech.net/characters/{}/portrait",
+            character_id
+        ))
     } else {
         None
     };
@@ -1353,10 +1332,18 @@ pub fn bungie(client_id: impl Into<String>, client_secret: impl Into<String>) ->
 
 fn normalize_bungie(profile: serde_json::Value) -> Result<User> {
     let response = profile.get("Response").cloned().unwrap_or(profile.clone());
-    let bungie_user = response.get("bungieNetUser").cloned().unwrap_or(response.clone());
+    let bungie_user = response
+        .get("bungieNetUser")
+        .cloned()
+        .unwrap_or(response.clone());
 
     let membership_id = json_string(&bungie_user, "membershipId")
-        .or_else(|| bungie_user.get("membershipId").and_then(|v| v.as_i64()).map(|id| id.to_string()))
+        .or_else(|| {
+            bungie_user
+                .get("membershipId")
+                .and_then(|v| v.as_i64())
+                .map(|id| id.to_string())
+        })
         .unwrap_or_default();
 
     let icon_path = json_string(&bungie_user, "profilePicturePath");
@@ -1487,7 +1474,11 @@ pub fn dribbble(client_id: impl Into<String>, client_secret: impl Into<String>) 
 
 fn normalize_dribbble(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string()).unwrap_or_default(),
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         email: None,
         email_verified: false,
         name: json_string(&profile, "name").or_else(|| json_string(&profile, "login")),
@@ -1497,13 +1488,16 @@ fn normalize_dribbble(profile: serde_json::Value) -> Result<User> {
 }
 
 /// Foursquare - OAuth2 provider
-pub fn foursquare(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+pub fn foursquare(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
     OAuth2Provider::new(
         "foursquare",
         "Foursquare",
         "https://foursquare.com/oauth2/authenticate",
         "https://foursquare.com/oauth2/access_token",
-        Some("https://api.foursquare.com/v2/users/self"),
+        Some("https://api.foursquare.com/v2/users/self?v=20230131"),
         Vec::<String>::new(),
         client_id,
         client_secret,
@@ -1512,7 +1506,10 @@ pub fn foursquare(client_id: impl Into<String>, client_secret: impl Into<String>
 }
 
 fn normalize_foursquare(profile: serde_json::Value) -> Result<User> {
-    let response = profile.get("response").and_then(|r| r.get("user")).cloned()
+    let response = profile
+        .get("response")
+        .and_then(|r| r.get("user"))
+        .cloned()
         .unwrap_or(profile.clone());
 
     let first = json_string(&response, "firstName").unwrap_or_default();
@@ -1532,7 +1529,9 @@ fn normalize_foursquare(profile: serde_json::Value) -> Result<User> {
 
     Ok(User {
         id: json_string(&response, "id").unwrap_or_default(),
-        email: response.get("contact").and_then(|c| json_string(c, "email")),
+        email: response
+            .get("contact")
+            .and_then(|c| json_string(c, "email")),
         email_verified: true,
         name,
         image,
@@ -1557,12 +1556,15 @@ pub fn trakt(client_id: impl Into<String>, client_secret: impl Into<String>) -> 
 
 fn normalize_trakt(profile: serde_json::Value) -> Result<User> {
     let ids = profile.get("ids");
-    let id = ids.and_then(|i| json_string(i, "slug"))
+    let id = ids
+        .and_then(|i| json_string(i, "slug"))
         .or_else(|| json_string(&profile, "username"))
         .unwrap_or_default();
 
     let images = profile.get("images");
-    let image = images.and_then(|i| i.get("avatar")).and_then(|a| json_string(a, "full"));
+    let image = images
+        .and_then(|i| i.get("avatar"))
+        .and_then(|a| json_string(a, "full"));
 
     Ok(User {
         id,
@@ -1593,7 +1595,10 @@ fn normalize_todoist(profile: serde_json::Value) -> Result<User> {
     let user = profile.get("user").cloned().unwrap_or(profile.clone());
 
     Ok(User {
-        id: user.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: user
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .or_else(|| json_string(&user, "id"))
             .unwrap_or_default(),
         email: json_string(&user, "email"),
@@ -1623,7 +1628,10 @@ fn normalize_clickup(profile: serde_json::Value) -> Result<User> {
     let user = profile.get("user").cloned().unwrap_or(profile.clone());
 
     Ok(User {
-        id: user.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: user
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .or_else(|| json_string(&user, "id"))
             .unwrap_or_default(),
         email: json_string(&user, "email"),
@@ -1653,7 +1661,10 @@ fn normalize_pipedrive(profile: serde_json::Value) -> Result<User> {
     let data = profile.get("data").cloned().unwrap_or(profile.clone());
 
     Ok(User {
-        id: data.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: data
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .or_else(|| json_string(&data, "id"))
             .unwrap_or_default(),
         email: json_string(&data, "email"),
@@ -1665,11 +1676,14 @@ fn normalize_pipedrive(profile: serde_json::Value) -> Result<User> {
 }
 
 /// FreshBooks - OAuth2 provider
-pub fn freshbooks(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+pub fn freshbooks(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
     OAuth2Provider::new(
         "freshbooks",
         "FreshBooks",
-        "https://auth.freshbooks.com/oauth/authorize",
+        "https://auth.freshbooks.com/service/auth/oauth/authorize",
         "https://api.freshbooks.com/auth/oauth/token",
         Some("https://api.freshbooks.com/auth/api/v1/users/me"),
         Vec::<String>::new(),
@@ -1691,7 +1705,10 @@ fn normalize_freshbooks(profile: serde_json::Value) -> Result<User> {
     };
 
     Ok(User {
-        id: response.get("id").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: response
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .or_else(|| json_string(&response, "id"))
             .unwrap_or_default(),
         email: json_string(&response, "email"),
@@ -1749,7 +1766,10 @@ pub fn wordpress(client_id: impl Into<String>, client_secret: impl Into<String>)
 
 fn normalize_wordpress(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile.get("ID").and_then(|v| v.as_i64()).map(|id| id.to_string())
+        id: profile
+            .get("ID")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
             .or_else(|| json_string(&profile, "ID"))
             .unwrap_or_default(),
         email: json_string(&profile, "email"),
@@ -1778,7 +1798,12 @@ pub fn wikimedia(client_id: impl Into<String>, client_secret: impl Into<String>)
 fn normalize_wikimedia(profile: serde_json::Value) -> Result<User> {
     Ok(User {
         id: json_string(&profile, "sub")
-            .or_else(|| profile.get("sub").and_then(|v| v.as_i64()).map(|id| id.to_string()))
+            .or_else(|| {
+                profile
+                    .get("sub")
+                    .and_then(|v| v.as_i64())
+                    .map(|id| id.to_string())
+            })
             .unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
@@ -1835,7 +1860,10 @@ pub fn nextcloud(
 }
 
 fn normalize_nextcloud(profile: serde_json::Value) -> Result<User> {
-    let ocs = profile.get("ocs").and_then(|o| o.get("data")).cloned()
+    let ocs = profile
+        .get("ocs")
+        .and_then(|o| o.get("data"))
+        .cloned()
         .unwrap_or(profile.clone());
 
     Ok(User {
@@ -1874,61 +1902,551 @@ fn normalize_threads(profile: serde_json::Value) -> Result<User> {
     })
 }
 
-/// Roblox - OAuth2 provider
-pub fn roblox(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+/// Roblox - OIDC provider
+pub fn roblox(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://apis.roblox.com/oauth/", client_id, client_secret)
+        .with_id("roblox")
+        .with_name("Roblox")
+        .with_scopes(vec!["openid".to_string(), "profile".to_string()])
+}
+
+/// HuggingFace - OIDC provider
+pub fn huggingface(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://huggingface.co", client_id, client_secret)
+        .with_id("huggingface")
+        .with_name("Hugging Face")
+        .with_scopes(vec![
+            "openid".to_string(),
+            "profile".to_string(),
+            "email".to_string(),
+        ])
+}
+
+// ============================================================================
+// Additional Providers (matching NextAuth.js)
+// ============================================================================
+
+/// Apple - OIDC provider
+/// Note: Apple requires HTTPS and doesn't support localhost.
+/// The client secret must be a JWT.
+pub fn apple(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://appleid.apple.com", client_id, client_secret)
+        .with_id("apple")
+        .with_name("Apple")
+        .with_scopes(vec!["name".to_string(), "email".to_string()])
+}
+
+/// 42 School - OAuth2 provider
+pub fn fortytwo_school(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
     OAuth2Provider::new(
-        "roblox",
-        "Roblox",
-        "https://apis.roblox.com/oauth/v1/authorize",
-        "https://apis.roblox.com/oauth/v1/token",
-        Some("https://apis.roblox.com/oauth/v1/userinfo"),
-        vec!["openid", "profile"],
+        "42-school",
+        "42 School",
+        "https://api.intra.42.fr/oauth/authorize",
+        "https://api.intra.42.fr/oauth/token",
+        Some("https://api.intra.42.fr/v2/me"),
+        vec!["public"],
         client_id,
         client_secret,
-        normalize_roblox,
+        normalize_fortytwo_school,
     )
 }
 
-fn normalize_roblox(profile: serde_json::Value) -> Result<User> {
-    let sub = json_string(&profile, "sub").unwrap_or_default();
-    let image = if !sub.is_empty() {
-        Some(format!("https://www.roblox.com/headshot-thumbnail/image?userId={}&width=420&height=420&format=png", sub))
-    } else {
-        None
-    };
+fn normalize_fortytwo_school(profile: serde_json::Value) -> Result<User> {
+    Ok(User {
+        id: profile
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        email: json_string(&profile, "email"),
+        email_verified: true,
+        name: json_string(&profile, "usual_full_name").or_else(|| json_string(&profile, "login")),
+        image: profile.get("image").and_then(|i| json_string(i, "link")),
+        raw: profile,
+    })
+}
+
+/// Azure AD B2C - OIDC provider
+pub fn azure_ad_b2c(
+    tenant_name: impl AsRef<str>,
+    user_flow: impl AsRef<str>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    let issuer = format!(
+        "https://{}.b2clogin.com/{}.onmicrosoft.com/{}/v2.0",
+        tenant_name.as_ref(),
+        tenant_name.as_ref(),
+        user_flow.as_ref()
+    );
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("azure-ad-b2c")
+        .with_name("Azure AD B2C")
+}
+
+/// Azure DevOps - OAuth2 provider
+/// Note: Microsoft recommends using Microsoft Entra ID instead.
+pub fn azure_devops(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
+    OAuth2Provider::new(
+        "azure-devops",
+        "Azure DevOps",
+        "https://app.vssps.visualstudio.com/oauth2/authorize",
+        "https://app.vssps.visualstudio.com/oauth2/token",
+        Some("https://app.vssps.visualstudio.com/_apis/profile/profiles/me?details=true&coreAttributes=Avatar&api-version=6.0"),
+        vec!["vso.profile"],
+        client_id,
+        client_secret,
+        normalize_azure_devops,
+    )
+}
+
+fn normalize_azure_devops(profile: serde_json::Value) -> Result<User> {
+    let avatar = profile
+        .get("coreAttributes")
+        .and_then(|c| c.get("Avatar"))
+        .and_then(|a| a.get("value"))
+        .and_then(|v| json_string(v, "value"));
 
     Ok(User {
-        id: sub,
-        email: None,
-        email_verified: false,
-        name: json_string(&profile, "preferred_username").or_else(|| json_string(&profile, "name")),
+        id: json_string(&profile, "id").unwrap_or_default(),
+        email: json_string(&profile, "emailAddress"),
+        email_verified: true,
+        name: json_string(&profile, "displayName"),
+        image: avatar,
+        raw: profile,
+    })
+}
+
+/// Eventbrite - OAuth2 provider
+pub fn eventbrite(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
+    OAuth2Provider::new(
+        "eventbrite",
+        "Eventbrite",
+        "https://www.eventbrite.com/oauth/authorize",
+        "https://www.eventbrite.com/oauth/token",
+        Some("https://www.eventbriteapi.com/v3/users/me/"),
+        vec!["user.profile"],
+        client_id,
+        client_secret,
+        normalize_eventbrite,
+    )
+}
+
+fn normalize_eventbrite(profile: serde_json::Value) -> Result<User> {
+    let emails = profile.get("emails").and_then(|e| e.as_array());
+    let email = emails
+        .and_then(|arr| {
+            arr.iter()
+                .find(|e| e.get("primary").and_then(|p| p.as_bool()).unwrap_or(false))
+        })
+        .and_then(|e| json_string(e, "email"))
+        .or_else(|| {
+            emails
+                .and_then(|arr| arr.first())
+                .and_then(|e| json_string(e, "email"))
+        });
+
+    let image_id = json_string(&profile, "image_id");
+    let image = image_id.map(|id| {
+        format!(
+            "https://img.evbuc.com/https%3A%2F%2Fcdn.evbuc.com%2Fimages%2F{}%2F",
+            id
+        )
+    });
+
+    Ok(User {
+        id: json_string(&profile, "id").unwrap_or_default(),
+        email,
+        email_verified: true,
+        name: json_string(&profile, "name"),
         image,
         raw: profile,
     })
 }
 
-/// HuggingFace - OAuth2 provider
-pub fn huggingface(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+/// FACEIT - OAuth2 provider
+pub fn faceit(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
     OAuth2Provider::new(
-        "huggingface",
-        "Hugging Face",
-        "https://huggingface.co/oauth/authorize",
-        "https://huggingface.co/oauth/token",
-        Some("https://huggingface.co/oauth/userinfo"),
-        vec!["openid", "profile", "email"],
+        "faceit",
+        "FACEIT",
+        "https://accounts.faceit.com/accounts?redirect_popup=true",
+        "https://api.faceit.com/auth/v1/oauth/token",
+        Some("https://api.faceit.com/auth/v1/resources/userinfo"),
+        vec!["openid", "email", "profile"],
         client_id,
         client_secret,
-        normalize_huggingface,
+        normalize_faceit,
     )
 }
 
-fn normalize_huggingface(profile: serde_json::Value) -> Result<User> {
+fn normalize_faceit(profile: serde_json::Value) -> Result<User> {
+    Ok(User {
+        id: json_string(&profile, "guid").unwrap_or_default(),
+        email: json_string(&profile, "email"),
+        email_verified: true,
+        name: json_string(&profile, "name").or_else(|| json_string(&profile, "nickname")),
+        image: json_string(&profile, "picture"),
+        raw: profile,
+    })
+}
+
+/// Mail.ru - OAuth2 provider
+pub fn mailru(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+    OAuth2Provider::new(
+        "mailru",
+        "Mail.ru",
+        "https://oauth.mail.ru/login",
+        "https://oauth.mail.ru/token",
+        Some("https://oauth.mail.ru/userinfo"),
+        vec!["userinfo"],
+        client_id,
+        client_secret,
+        normalize_mailru,
+    )
+}
+
+fn normalize_mailru(profile: serde_json::Value) -> Result<User> {
+    Ok(User {
+        id: json_string(&profile, "id").unwrap_or_default(),
+        email: json_string(&profile, "email"),
+        email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
+        name: json_string(&profile, "name"),
+        image: json_string(&profile, "picture"),
+        raw: profile,
+    })
+}
+
+/// SimpleLogin - OIDC provider
+pub fn simplelogin(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new("https://app.simplelogin.io", client_id, client_secret)
+        .with_id("simplelogin")
+        .with_name("SimpleLogin")
+}
+
+/// Vipps - OIDC provider (Norwegian payment/identity)
+pub fn vipps(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new(
+        "https://api.vipps.no/access-management-1.0/access/",
+        client_id,
+        client_secret,
+    )
+    .with_id("vipps")
+    .with_name("Vipps")
+    .with_scopes(vec![
+        "openid".to_string(),
+        "name".to_string(),
+        "email".to_string(),
+    ])
+}
+
+/// Vipps test environment
+pub fn vipps_test(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
+    OidcProvider::new(
+        "https://apitest.vipps.no/access-management-1.0/access/",
+        client_id,
+        client_secret,
+    )
+    .with_id("vipps")
+    .with_name("Vipps")
+    .with_scopes(vec![
+        "openid".to_string(),
+        "name".to_string(),
+        "email".to_string(),
+    ])
+}
+
+/// Passage by 1Password - OIDC provider
+pub fn passage(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("passage")
+        .with_name("Passage")
+}
+
+/// Beyond Identity - OIDC provider
+pub fn beyondidentity(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("beyondidentity")
+        .with_name("Beyond Identity")
+}
+
+/// WeChat - OAuth2 provider
+pub fn wechat(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+    wechat_official_account(client_id, client_secret)
+}
+
+/// WeChat Official Account - OAuth2 provider
+pub fn wechat_official_account(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
+    OAuth2Provider::new(
+        "wechat",
+        "WeChat",
+        "https://open.weixin.qq.com/connect/oauth2/authorize",
+        "https://api.weixin.qq.com/sns/oauth2/access_token",
+        Some("https://api.weixin.qq.com/sns/userinfo"),
+        vec!["snsapi_userinfo"],
+        client_id,
+        client_secret,
+        normalize_wechat,
+    )
+}
+
+/// WeChat Website App - OAuth2 provider (uses QR code login)
+pub fn wechat_website(
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
+    OAuth2Provider::new(
+        "wechat",
+        "WeChat",
+        "https://open.weixin.qq.com/connect/qrconnect",
+        "https://api.weixin.qq.com/sns/oauth2/access_token",
+        Some("https://api.weixin.qq.com/sns/userinfo"),
+        vec!["snsapi_login"],
+        client_id,
+        client_secret,
+        normalize_wechat,
+    )
+}
+
+fn normalize_wechat(profile: serde_json::Value) -> Result<User> {
+    Ok(User {
+        id: json_string(&profile, "unionid")
+            .or_else(|| json_string(&profile, "openid"))
+            .unwrap_or_default(),
+        email: None, // WeChat doesn't provide email
+        email_verified: false,
+        name: json_string(&profile, "nickname"),
+        image: json_string(&profile, "headimgurl"),
+        raw: profile,
+    })
+}
+
+/// Asgardeo - OIDC provider (WSO2)
+pub fn asgardeo(
+    organization: impl AsRef<str>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    let issuer = format!("https://api.asgardeo.io/t/{}", organization.as_ref());
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("asgardeo")
+        .with_name("Asgardeo")
+}
+
+/// Frontegg - OIDC provider
+pub fn frontegg(
+    domain: impl AsRef<str>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    let issuer = format!(
+        "https://{}",
+        domain
+            .as_ref()
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+    );
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("frontegg")
+        .with_name("Frontegg")
+}
+
+/// Ory Hydra - OIDC provider
+pub fn ory_hydra(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("ory-hydra")
+        .with_name("Ory Hydra")
+}
+
+/// Duende IdentityServer - OIDC provider
+pub fn duende_identity_server(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("duende-identity-server")
+        .with_name("Duende IdentityServer")
+}
+
+/// IdentityServer4 - OIDC provider (legacy)
+pub fn identity_server4(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("identity-server4")
+        .with_name("IdentityServer4")
+}
+
+/// United Effects - OIDC provider
+pub fn united_effects(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("united-effects")
+        .with_name("United Effects")
+}
+
+/// BankID Norway - OIDC provider
+pub fn bankid_no(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("bankid-no")
+        .with_name("BankID Norway")
+}
+
+/// Ping Identity - OIDC provider
+pub fn ping_id(
+    issuer: impl Into<String>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(issuer, client_id, client_secret)
+        .with_id("ping-id")
+        .with_name("Ping Identity")
+}
+
+/// NetSuite - OAuth2 provider
+pub fn netsuite(
+    account_id: impl AsRef<str>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
+    let account = account_id.as_ref().to_lowercase().replace('_', "-");
+    OAuth2Provider::new(
+        "netsuite",
+        "NetSuite",
+        format!(
+            "https://{}.app.netsuite.com/app/login/oauth2/authorize.nl",
+            account
+        ),
+        format!(
+            "https://{}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token",
+            account
+        ),
+        Some(format!(
+            "https://{}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/userinfo",
+            account
+        )),
+        vec!["restlets", "rest_webservices"],
+        client_id,
+        client_secret,
+        normalize_netsuite,
+    )
+}
+
+fn normalize_netsuite(profile: serde_json::Value) -> Result<User> {
     Ok(User {
         id: json_string(&profile, "sub").unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
-        name: json_string(&profile, "name").or_else(|| json_string(&profile, "preferred_username")),
-        image: json_string(&profile, "picture"),
+        name: json_string(&profile, "name"),
+        image: None,
         raw: profile,
     })
+}
+
+/// Concept2 - OAuth2 provider (rowing/fitness)
+pub fn concept2(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
+    OAuth2Provider::new(
+        "concept2",
+        "Concept2",
+        "https://log.concept2.com/oauth/authorize",
+        "https://log.concept2.com/oauth/access_token",
+        Some("https://log.concept2.com/api/users/me"),
+        vec!["user:read"],
+        client_id,
+        client_secret,
+        normalize_concept2,
+    )
+}
+
+fn normalize_concept2(profile: serde_json::Value) -> Result<User> {
+    let data = profile.get("data").cloned().unwrap_or(profile.clone());
+    Ok(User {
+        id: data
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        email: json_string(&data, "email"),
+        email_verified: true,
+        name: json_string(&data, "username").or_else(|| {
+            let first = json_string(&data, "first_name").unwrap_or_default();
+            let last = json_string(&data, "last_name").unwrap_or_default();
+            if !first.is_empty() || !last.is_empty() {
+                Some(format!("{} {}", first, last).trim().to_string())
+            } else {
+                None
+            }
+        }),
+        image: None,
+        raw: profile,
+    })
+}
+
+/// Generic OAuth2 provider - use for any OAuth2-compliant identity provider
+pub fn oauth2(
+    id: impl Into<String>,
+    name: impl Into<String>,
+    authorization_url: impl Into<String>,
+    token_url: impl Into<String>,
+    userinfo_url: Option<impl Into<String>>,
+    scopes: impl IntoIterator<Item = impl Into<String>>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OAuth2Provider {
+    OAuth2Provider::new(
+        id,
+        name,
+        authorization_url,
+        token_url,
+        userinfo_url.map(|u| u.into()),
+        scopes,
+        client_id,
+        client_secret,
+        |profile| {
+            Ok(User {
+                id: json_string(&profile, "sub")
+                    .or_else(|| json_string(&profile, "id"))
+                    .unwrap_or_default(),
+                email: json_string(&profile, "email"),
+                email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
+                name: json_string(&profile, "name"),
+                image: json_string(&profile, "picture")
+                    .or_else(|| json_string(&profile, "avatar_url")),
+                raw: profile,
+            })
+        },
+    )
 }
