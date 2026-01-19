@@ -1,0 +1,47 @@
+[package]
+name = "oauth-kit"
+version = "0.1.0"
+edition = "2021"
+description = "OAuth client library with batteries-included provider configurations and axum integration"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cachix/oauth-kit"
+keywords = ["oauth", "oauth2", "oidc", "authentication", "axum"]
+categories = ["authentication", "web-programming"]
+
+[features]
+default = ["axum-integration", "oidc"]
+
+# Axum web framework integration
+axum-integration = ["dep:axum", "dep:axum-extra", "dep:tower-sessions"]
+
+# OpenID Connect support (Google, Auth0, Okta, Keycloak, Azure AD, etc.)
+# Enables OIDC discovery, ID token verification, and all OIDC providers
+oidc = ["dep:openidconnect"]
+
+[dependencies]
+oauth2 = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+thiserror = "2"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+url = "2"
+tracing = "0.1"
+
+# Optional OIDC support
+openidconnect = { version = "4", optional = true }
+
+# Optional axum integration
+axum = { version = "0.8", optional = true }
+axum-extra = { version = "0.10", features = ["typed-header"], optional = true }
+tower-sessions = { version = "0.14", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tower-sessions = { version = "0.14", features = ["memory-store"] }
+tracing-subscriber = "0.3"
+
+[[example]]
+name = "basic"
+required-features = ["axum-integration", "oidc"]
