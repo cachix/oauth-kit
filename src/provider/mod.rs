@@ -15,7 +15,7 @@ pub mod oidc;
 #[cfg(feature = "oidc")]
 pub mod providers;
 
-pub use self::oauth2_provider::{OAuth2Provider, OAuth2ProviderWithExtra};
+pub use self::oauth2_provider::OAuth2Provider;
 
 #[cfg(feature = "oidc")]
 pub use self::oidc::OidcProvider;

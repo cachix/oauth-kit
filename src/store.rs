@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::User;
@@ -45,20 +46,14 @@ pub trait UserStore: Send + Sync + 'static {
 /// This store does not persist data between restarts.
 #[derive(Debug, Clone)]
 pub struct MemoryStore {
-    users: std::sync::Arc<std::sync::RwLock<Vec<StoredUser>>>,
-}
-
-#[derive(Debug, Clone)]
-struct StoredUser {
-    id: String,
-    provider: String,
-    provider_user_id: String,
+    /// Maps (provider, provider_user_id) to internal user ID.
+    users: std::sync::Arc<std::sync::RwLock<HashMap<(String, String), String>>>,
 }
 
 impl Default for MemoryStore {
     fn default() -> Self {
         Self {
-            users: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+            users: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
     }
 }
@@ -88,22 +83,12 @@ impl UserStore for MemoryStore {
             .write()
             .map_err(|e| MemoryStoreError(e.to_string()))?;
 
-        // Check if user exists
-        if let Some(stored) = users
-            .iter()
-            .find(|u| u.provider == provider && u.provider_user_id == user.id)
-        {
-            return Ok(stored.id.clone());
-        }
+        let key = (provider.to_string(), user.id.clone());
+        let next_id = users.len() + 1;
+        let id = users
+            .entry(key)
+            .or_insert_with(|| format!("user_{}", next_id));
 
-        // Create new user
-        let id = format!("user_{}", users.len() + 1);
-        users.push(StoredUser {
-            id: id.clone(),
-            provider: provider.to_string(),
-            provider_user_id: user.id.clone(),
-        });
-
-        Ok(id)
+        Ok(id.clone())
     }
 }

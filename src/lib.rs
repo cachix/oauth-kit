@@ -108,7 +108,7 @@ pub use store::UserStore;
 pub use user::User;
 
 pub use provider::{AuthorizationRequest, OAuthProvider, ProviderRegistry};
-pub use provider::{OAuth2Provider, OAuth2ProviderWithExtra};
+pub use provider::OAuth2Provider;
 
 #[cfg(feature = "oidc")]
 pub use provider::OidcProvider;

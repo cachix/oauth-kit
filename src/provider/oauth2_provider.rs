@@ -27,6 +27,14 @@ pub type AsyncProfileNormalizer = for<'a> fn(
     Box<dyn std::future::Future<Output = Result<User>> + Send + 'a>,
 >;
 
+/// How the provider normalizes the raw profile into a `User`.
+enum Normalizer {
+    /// Synchronous normalization from a JSON profile.
+    Sync(ProfileNormalizer),
+    /// Async normalization that can make additional API calls.
+    Async(AsyncProfileNormalizer),
+}
+
 /// Build an HTTP client with redirect protection against SSRF.
 pub(crate) fn build_http_client() -> Result<oauth2::reqwest::Client> {
     oauth2::reqwest::ClientBuilder::new()
@@ -113,6 +121,10 @@ async fn oauth2_exchange_token(
 ///
 /// Use this for providers that don't support OIDC and require fetching
 /// user profile from a separate API endpoint.
+///
+/// Supports both synchronous profile normalization (via [`OAuth2Provider::new`])
+/// and async normalization that can make additional API calls (via
+/// [`OAuth2Provider::new_with_extra`]).
 pub struct OAuth2Provider {
     id: String,
     name: String,
@@ -122,11 +134,11 @@ pub struct OAuth2Provider {
     scopes: Vec<String>,
     client_id: String,
     client_secret: String,
-    normalize_profile: ProfileNormalizer,
+    normalizer: Normalizer,
 }
 
 impl OAuth2Provider {
-    /// Create a new OAuth2 provider with the given configuration.
+    /// Create a new OAuth2 provider with synchronous profile normalization.
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -147,7 +159,35 @@ impl OAuth2Provider {
             scopes: scopes.into_iter().map(|s| s.into()).collect(),
             client_id: client_id.into(),
             client_secret: client_secret.into(),
-            normalize_profile,
+            normalizer: Normalizer::Sync(normalize_profile),
+        }
+    }
+
+    /// Create a new OAuth2 provider that needs extra API calls for profile normalization.
+    ///
+    /// Some providers (like GitHub) require additional API calls to get
+    /// email or other profile information.
+    pub fn new_with_extra(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        authorization_url: impl Into<String>,
+        token_url: impl Into<String>,
+        userinfo_url: Option<impl Into<String>>,
+        scopes: impl IntoIterator<Item = impl Into<String>>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+        normalize_profile: AsyncProfileNormalizer,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            authorization_url: authorization_url.into(),
+            token_url: token_url.into(),
+            userinfo_url: userinfo_url.map(|u| u.into()),
+            scopes: scopes.into_iter().map(|s| s.into()).collect(),
+            client_id: client_id.into(),
+            client_secret: client_secret.into(),
+            normalizer: Normalizer::Async(normalize_profile),
         }
     }
 
@@ -218,124 +258,16 @@ impl super::OAuthProvider for OAuth2Provider {
         )
         .await?;
 
-        let profile =
-            userinfo.ok_or_else(|| Error::ProfileFetch("No userinfo response".to_string()))?;
-        let user = (self.normalize_profile)(profile)?;
-
-        Ok((user, access_token))
-    }
-}
-
-/// OAuth2 provider that needs additional API calls for complete profile.
-///
-/// Some providers (like GitHub) require additional API calls to get
-/// email or other profile information.
-pub struct OAuth2ProviderWithExtra {
-    id: String,
-    name: String,
-    authorization_url: String,
-    token_url: String,
-    userinfo_url: Option<String>,
-    scopes: Vec<String>,
-    client_id: String,
-    client_secret: String,
-    normalize_profile: AsyncProfileNormalizer,
-}
-
-impl OAuth2ProviderWithExtra {
-    /// Create a new OAuth2 provider that needs extra API calls.
-    pub fn new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        authorization_url: impl Into<String>,
-        token_url: impl Into<String>,
-        userinfo_url: Option<impl Into<String>>,
-        scopes: impl IntoIterator<Item = impl Into<String>>,
-        client_id: impl Into<String>,
-        client_secret: impl Into<String>,
-        normalize_profile: AsyncProfileNormalizer,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            authorization_url: authorization_url.into(),
-            token_url: token_url.into(),
-            userinfo_url: userinfo_url.map(|u| u.into()),
-            scopes: scopes.into_iter().map(|s| s.into()).collect(),
-            client_id: client_id.into(),
-            client_secret: client_secret.into(),
-            normalize_profile,
-        }
-    }
-
-    /// Set a custom provider ID.
-    pub fn with_id(mut self, id: impl Into<String>) -> Self {
-        self.id = id.into();
-        self
-    }
-
-    /// Set a custom display name.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = name.into();
-        self
-    }
-
-    /// Set custom scopes.
-    pub fn with_scopes(mut self, scopes: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.scopes = scopes.into_iter().map(|s| s.into()).collect();
-        self
-    }
-
-    /// Add additional scopes to the default set.
-    pub fn add_scope(mut self, scope: impl Into<String>) -> Self {
-        self.scopes.push(scope.into());
-        self
-    }
-}
-
-#[async_trait]
-impl super::OAuthProvider for OAuth2ProviderWithExtra {
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    async fn authorization_url(&self, redirect_url: &str) -> Result<AuthorizationRequest> {
-        oauth2_authorization_url(
-            &self.client_id,
-            &self.client_secret,
-            &self.authorization_url,
-            &self.token_url,
-            redirect_url,
-            &self.scopes,
-        )
-    }
-
-    async fn exchange_code(
-        &self,
-        redirect_url: &str,
-        code: &str,
-        pkce_verifier: Option<&str>,
-        _nonce: Option<&str>,
-    ) -> Result<(User, String)> {
-        let http_client = build_http_client()?;
-        let (access_token, userinfo) = oauth2_exchange_token(
-            &self.client_id,
-            &self.client_secret,
-            &self.authorization_url,
-            &self.token_url,
-            redirect_url,
-            &http_client,
-            code,
-            pkce_verifier,
-            self.userinfo_url.as_deref(),
-        )
-        .await?;
-
-        let user = (self.normalize_profile)(&http_client, &access_token, userinfo).await?;
+        let user = match &self.normalizer {
+            Normalizer::Sync(normalize) => {
+                let profile = userinfo
+                    .ok_or_else(|| Error::ProfileFetch("No userinfo response".to_string()))?;
+                normalize(profile)?
+            }
+            Normalizer::Async(normalize) => {
+                normalize(&http_client, &access_token, userinfo).await?
+            }
+        };
 
         Ok((user, access_token))
     }

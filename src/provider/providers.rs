@@ -10,10 +10,13 @@
 use crate::error::{Error, Result};
 use crate::User;
 
-use super::oauth2_provider::{
-    fetch_json, json_bool, json_string, json_string_any, OAuth2Provider, OAuth2ProviderWithExtra,
-};
+use super::oauth2_provider::{fetch_json, json_bool, json_string, json_string_any, OAuth2Provider};
 use super::oidc::OidcProvider;
+
+/// Read a required environment variable, returning a config error if not set.
+fn required_env_var(name: &str) -> Result<String> {
+    std::env::var(name).map_err(|_| Error::Config(format!("{} not set", name)))
+}
 
 // ============================================================================
 // OIDC Providers
@@ -30,10 +33,8 @@ pub fn google(client_id: impl Into<String>, client_secret: impl Into<String>) ->
 
 /// Google from environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
 pub fn google_from_env() -> Result<OidcProvider> {
-    let client_id = std::env::var("GOOGLE_CLIENT_ID")
-        .map_err(|_| Error::Config("GOOGLE_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
-        .map_err(|_| Error::Config("GOOGLE_CLIENT_SECRET not set".to_string()))?;
+    let client_id = required_env_var("GOOGLE_CLIENT_ID")?;
+    let client_secret = required_env_var("GOOGLE_CLIENT_SECRET")?;
     Ok(google(client_id, client_secret))
 }
 
@@ -48,12 +49,9 @@ pub fn auth0(
 
 /// Auth0 from environment variables (AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET)
 pub fn auth0_from_env() -> Result<OidcProvider> {
-    let domain = std::env::var("AUTH0_DOMAIN")
-        .map_err(|_| Error::Config("AUTH0_DOMAIN not set".to_string()))?;
-    let client_id = std::env::var("AUTH0_CLIENT_ID")
-        .map_err(|_| Error::Config("AUTH0_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("AUTH0_CLIENT_SECRET")
-        .map_err(|_| Error::Config("AUTH0_CLIENT_SECRET not set".to_string()))?;
+    let domain = required_env_var("AUTH0_DOMAIN")?;
+    let client_id = required_env_var("AUTH0_CLIENT_ID")?;
+    let client_secret = required_env_var("AUTH0_CLIENT_SECRET")?;
     Ok(auth0(domain, client_id, client_secret))
 }
 
@@ -68,12 +66,9 @@ pub fn okta(
 
 /// Okta from environment variables (OKTA_DOMAIN, OKTA_CLIENT_ID, OKTA_CLIENT_SECRET)
 pub fn okta_from_env() -> Result<OidcProvider> {
-    let domain = std::env::var("OKTA_DOMAIN")
-        .map_err(|_| Error::Config("OKTA_DOMAIN not set".to_string()))?;
-    let client_id = std::env::var("OKTA_CLIENT_ID")
-        .map_err(|_| Error::Config("OKTA_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("OKTA_CLIENT_SECRET")
-        .map_err(|_| Error::Config("OKTA_CLIENT_SECRET not set".to_string()))?;
+    let domain = required_env_var("OKTA_DOMAIN")?;
+    let client_id = required_env_var("OKTA_CLIENT_ID")?;
+    let client_secret = required_env_var("OKTA_CLIENT_SECRET")?;
     Ok(okta(domain, client_id, client_secret))
 }
 
@@ -89,14 +84,10 @@ pub fn keycloak(
 
 /// Keycloak from environment variables (KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET)
 pub fn keycloak_from_env() -> Result<OidcProvider> {
-    let base_url = std::env::var("KEYCLOAK_URL")
-        .map_err(|_| Error::Config("KEYCLOAK_URL not set".to_string()))?;
-    let realm = std::env::var("KEYCLOAK_REALM")
-        .map_err(|_| Error::Config("KEYCLOAK_REALM not set".to_string()))?;
-    let client_id = std::env::var("KEYCLOAK_CLIENT_ID")
-        .map_err(|_| Error::Config("KEYCLOAK_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("KEYCLOAK_CLIENT_SECRET")
-        .map_err(|_| Error::Config("KEYCLOAK_CLIENT_SECRET not set".to_string()))?;
+    let base_url = required_env_var("KEYCLOAK_URL")?;
+    let realm = required_env_var("KEYCLOAK_REALM")?;
+    let client_id = required_env_var("KEYCLOAK_CLIENT_ID")?;
+    let client_secret = required_env_var("KEYCLOAK_CLIENT_SECRET")?;
     Ok(keycloak(base_url, realm, client_id, client_secret))
 }
 
@@ -111,12 +102,9 @@ pub fn azure_ad(
 
 /// Azure AD from environment variables (AZURE_AD_TENANT, AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET)
 pub fn azure_ad_from_env() -> Result<OidcProvider> {
-    let tenant = std::env::var("AZURE_AD_TENANT")
-        .map_err(|_| Error::Config("AZURE_AD_TENANT not set".to_string()))?;
-    let client_id = std::env::var("AZURE_AD_CLIENT_ID")
-        .map_err(|_| Error::Config("AZURE_AD_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("AZURE_AD_CLIENT_SECRET")
-        .map_err(|_| Error::Config("AZURE_AD_CLIENT_SECRET not set".to_string()))?;
+    let tenant = required_env_var("AZURE_AD_TENANT")?;
+    let client_id = required_env_var("AZURE_AD_CLIENT_ID")?;
+    let client_secret = required_env_var("AZURE_AD_CLIENT_SECRET")?;
     Ok(azure_ad(tenant, client_id, client_secret))
 }
 
@@ -150,15 +138,12 @@ pub fn cognito(
 
 /// Cognito from environment variables
 pub fn cognito_from_env() -> Result<OidcProvider> {
-    let user_pool_id = std::env::var("COGNITO_USER_POOL_ID")
-        .map_err(|_| Error::Config("COGNITO_USER_POOL_ID not set".to_string()))?;
+    let user_pool_id = required_env_var("COGNITO_USER_POOL_ID")?;
     let region = std::env::var("COGNITO_REGION")
         .or_else(|_| std::env::var("AWS_REGION"))
         .map_err(|_| Error::Config("COGNITO_REGION or AWS_REGION not set".to_string()))?;
-    let client_id = std::env::var("COGNITO_CLIENT_ID")
-        .map_err(|_| Error::Config("COGNITO_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("COGNITO_CLIENT_SECRET")
-        .map_err(|_| Error::Config("COGNITO_CLIENT_SECRET not set".to_string()))?;
+    let client_id = required_env_var("COGNITO_CLIENT_ID")?;
+    let client_secret = required_env_var("COGNITO_CLIENT_SECRET")?;
     Ok(cognito(user_pool_id, region, client_id, client_secret))
 }
 
@@ -303,8 +288,8 @@ pub fn oidc(
 pub fn github(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
-) -> OAuth2ProviderWithExtra {
-    OAuth2ProviderWithExtra::new(
+) -> OAuth2Provider {
+    OAuth2Provider::new_with_extra(
         "github",
         "GitHub",
         "https://github.com/login/oauth/authorize",
@@ -318,11 +303,9 @@ pub fn github(
 }
 
 /// GitHub from environment variables (GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)
-pub fn github_from_env() -> Result<OAuth2ProviderWithExtra> {
-    let client_id = std::env::var("GITHUB_CLIENT_ID")
-        .map_err(|_| Error::Config("GITHUB_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("GITHUB_CLIENT_SECRET")
-        .map_err(|_| Error::Config("GITHUB_CLIENT_SECRET not set".to_string()))?;
+pub fn github_from_env() -> Result<OAuth2Provider> {
+    let client_id = required_env_var("GITHUB_CLIENT_ID")?;
+    let client_secret = required_env_var("GITHUB_CLIENT_SECRET")?;
     Ok(github(client_id, client_secret))
 }
 
@@ -426,10 +409,8 @@ pub fn discord(client_id: impl Into<String>, client_secret: impl Into<String>) -
 
 /// Discord from environment variables
 pub fn discord_from_env() -> Result<OAuth2Provider> {
-    let client_id = std::env::var("DISCORD_CLIENT_ID")
-        .map_err(|_| Error::Config("DISCORD_CLIENT_ID not set".to_string()))?;
-    let client_secret = std::env::var("DISCORD_CLIENT_SECRET")
-        .map_err(|_| Error::Config("DISCORD_CLIENT_SECRET not set".to_string()))?;
+    let client_id = required_env_var("DISCORD_CLIENT_ID")?;
+    let client_secret = required_env_var("DISCORD_CLIENT_SECRET")?;
     Ok(discord(client_id, client_secret))
 }
 
