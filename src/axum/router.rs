@@ -70,14 +70,6 @@ impl<S: UserStore + Clone> AuthRouter<S> {
         self
     }
 
-    /// Get the callback URL for a provider.
-    pub fn callback_url(&self, provider_id: &str) -> String {
-        format!(
-            "{}{}/callback/{}",
-            self.base_url, self.path_prefix, provider_id
-        )
-    }
-
     /// Build the router with all configured routes.
     pub fn build(self) -> Router {
         let state = AuthState {

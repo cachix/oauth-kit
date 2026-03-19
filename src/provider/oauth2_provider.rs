@@ -296,6 +296,36 @@ pub fn json_bool(value: &serde_json::Value, field: &str) -> Option<bool> {
     value.get(field).and_then(|v| v.as_bool())
 }
 
+/// Helper to extract a numeric ID field as a string.
+pub fn json_id(value: &serde_json::Value, field: &str) -> Option<String> {
+    value.get(field).and_then(|v| {
+        v.as_str()
+            .map(|s| s.to_string())
+            .or_else(|| v.as_i64().map(|n| n.to_string()))
+    })
+}
+
+/// Helper to build a full name from first and last name fields.
+pub fn full_name(value: &serde_json::Value, first_field: &str, last_field: &str) -> Option<String> {
+    let first = json_string(value, first_field).unwrap_or_default();
+    let last = json_string(value, last_field).unwrap_or_default();
+    let name = format!("{} {}", first, last);
+    let name = name.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+/// Helper to strip protocol prefix from a domain string and prepend https.
+pub fn normalize_domain(domain: &str) -> String {
+    let domain = domain
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    format!("https://{}", domain)
+}
+
 /// Helper to fetch JSON from an API endpoint.
 pub async fn fetch_json<T: DeserializeOwned>(
     client: &reqwest::Client,

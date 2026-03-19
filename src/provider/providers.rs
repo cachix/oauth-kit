@@ -10,7 +10,10 @@
 use crate::error::{Error, Result};
 use crate::User;
 
-use super::oauth2_provider::{fetch_json, json_bool, json_string, json_string_any, OAuth2Provider};
+use super::oauth2_provider::{
+    fetch_json, full_name, json_bool, json_id, json_string, json_string_any, normalize_domain,
+    OAuth2Provider,
+};
 use super::oidc::OidcProvider;
 
 /// Read a required environment variable, returning a config error if not set.
@@ -153,14 +156,7 @@ pub fn fusionauth(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!(
-        "https://{}",
-        domain
-            .as_ref()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-    );
-    OidcProvider::new(issuer, client_id, client_secret)
+    OidcProvider::new(normalize_domain(domain.as_ref()), client_id, client_secret)
         .with_id("fusionauth")
         .with_name("FusionAuth")
 }
@@ -172,12 +168,8 @@ pub fn authentik(
     client_secret: impl Into<String>,
 ) -> OidcProvider {
     let issuer = format!(
-        "https://{}/application/o/{}",
-        domain
-            .as_ref()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://"),
-        "default" // application slug
+        "{}/application/o/default",
+        normalize_domain(domain.as_ref())
     );
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("authentik")
@@ -202,14 +194,7 @@ pub fn zitadel(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!(
-        "https://{}",
-        domain
-            .as_ref()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-    );
-    OidcProvider::new(issuer, client_id, client_secret)
+    OidcProvider::new(normalize_domain(domain.as_ref()), client_id, client_secret)
         .with_id("zitadel")
         .with_name("Zitadel")
 }
@@ -220,13 +205,7 @@ pub fn logto(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!(
-        "https://{}/oidc",
-        domain
-            .as_ref()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-    );
+    let issuer = format!("{}/oidc", normalize_domain(domain.as_ref()));
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("logto")
         .with_name("Logto")
@@ -238,14 +217,7 @@ pub fn kinde(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!(
-        "https://{}",
-        domain
-            .as_ref()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-    );
-    OidcProvider::new(issuer, client_id, client_secret)
+    OidcProvider::new(normalize_domain(domain.as_ref()), client_id, client_secret)
         .with_id("kinde")
         .with_name("Kinde")
 }
@@ -285,10 +257,7 @@ pub fn oidc(
 // User profile is fetched from a separate userinfo endpoint.
 
 /// GitHub - OAuth2 provider
-pub fn github(
-    client_id: impl Into<String>,
-    client_secret: impl Into<String>,
-) -> OAuth2Provider {
+pub fn github(client_id: impl Into<String>, client_secret: impl Into<String>) -> OAuth2Provider {
     OAuth2Provider::new_with_extra(
         "github",
         "GitHub",
@@ -329,10 +298,7 @@ async fn normalize_github(
     };
 
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
+        id: json_id(&profile, "id")
             .unwrap_or_else(|| json_string(&profile, "login").unwrap_or_default()),
         email,
         email_verified: true, // GitHub verifies emails
@@ -379,13 +345,13 @@ pub fn gitlab_with_url(
 
 fn normalize_gitlab(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
+        id: json_id(&profile, "id")
             .unwrap_or_else(|| json_string(&profile, "username").unwrap_or_default()),
         email: json_string(&profile, "email"),
-        email_verified: profile.get("confirmed_at").and_then(|v| v.as_str()).is_some(),
+        email_verified: profile
+            .get("confirmed_at")
+            .and_then(|v| v.as_str())
+            .is_some(),
         name: json_string(&profile, "name").or_else(|| json_string(&profile, "username")),
         image: json_string(&profile, "avatar_url"),
         raw: profile,
@@ -761,23 +727,11 @@ pub fn strava(client_id: impl Into<String>, client_secret: impl Into<String>) ->
 }
 
 fn normalize_strava(profile: serde_json::Value) -> Result<User> {
-    let first = json_string(&profile, "firstname").unwrap_or_default();
-    let last = json_string(&profile, "lastname").unwrap_or_default();
-    let name = if !first.is_empty() || !last.is_empty() {
-        Some(format!("{} {}", first, last).trim().to_string())
-    } else {
-        None
-    };
-
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&profile, "id").unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: true,
-        name,
+        name: full_name(&profile, "firstname", "lastname"),
         image: json_string(&profile, "profile"),
         raw: profile,
     })
@@ -863,11 +817,7 @@ fn normalize_kakao(profile: serde_json::Value) -> Result<User> {
     let kakao_profile = kakao_account.and_then(|a| a.get("profile"));
 
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&profile, "id").unwrap_or_default(),
         email: kakao_account.and_then(|a| json_string(a, "email")),
         email_verified: kakao_account
             .and_then(|a| json_bool(a, "is_email_verified"))
@@ -929,23 +879,11 @@ fn normalize_vk(profile: serde_json::Value) -> Result<User> {
         .cloned()
         .unwrap_or(profile.clone());
 
-    let first = json_string(&response, "first_name").unwrap_or_default();
-    let last = json_string(&response, "last_name").unwrap_or_default();
-    let name = if !first.is_empty() || !last.is_empty() {
-        Some(format!("{} {}", first, last).trim().to_string())
-    } else {
-        None
-    };
-
     Ok(User {
-        id: response
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&response, "id").unwrap_or_default(),
         email: json_string(&profile, "email"), // Email comes from token response
         email_verified: true,
-        name,
+        name: full_name(&response, "first_name", "last_name"),
         image: json_string(&response, "photo_100"),
         raw: profile,
     })
@@ -1151,15 +1089,8 @@ fn normalize_zoho(profile: serde_json::Value) -> Result<User> {
         id: json_string(&profile, "ZUID").unwrap_or_default(),
         email: json_string(&profile, "Email"),
         email_verified: true,
-        name: json_string(&profile, "Display_Name").or_else(|| {
-            let first = json_string(&profile, "First_Name").unwrap_or_default();
-            let last = json_string(&profile, "Last_Name").unwrap_or_default();
-            if !first.is_empty() || !last.is_empty() {
-                Some(format!("{} {}", first, last).trim().to_string())
-            } else {
-                None
-            }
-        }),
+        name: json_string(&profile, "Display_Name")
+            .or_else(|| full_name(&profile, "First_Name", "Last_Name")),
         image: None,
         raw: profile,
     })
@@ -1240,11 +1171,7 @@ pub fn osu(client_id: impl Into<String>, client_secret: impl Into<String>) -> OA
 
 fn normalize_osu(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&profile, "id").unwrap_or_default(),
         email: None,
         email_verified: false,
         name: json_string(&profile, "username"),
@@ -1269,14 +1196,7 @@ pub fn eveonline(client_id: impl Into<String>, client_secret: impl Into<String>)
 }
 
 fn normalize_eveonline(profile: serde_json::Value) -> Result<User> {
-    let character_id = json_string(&profile, "CharacterID")
-        .or_else(|| {
-            profile
-                .get("CharacterID")
-                .and_then(|v| v.as_i64())
-                .map(|id| id.to_string())
-        })
-        .unwrap_or_default();
+    let character_id = json_id(&profile, "CharacterID").unwrap_or_default();
     let image = if !character_id.is_empty() {
         Some(format!(
             "https://images.evetech.net/characters/{}/portrait",
@@ -1318,14 +1238,7 @@ fn normalize_bungie(profile: serde_json::Value) -> Result<User> {
         .cloned()
         .unwrap_or(response.clone());
 
-    let membership_id = json_string(&bungie_user, "membershipId")
-        .or_else(|| {
-            bungie_user
-                .get("membershipId")
-                .and_then(|v| v.as_i64())
-                .map(|id| id.to_string())
-        })
-        .unwrap_or_default();
+    let membership_id = json_id(&bungie_user, "membershipId").unwrap_or_default();
 
     let icon_path = json_string(&bungie_user, "profilePicturePath");
     let image = icon_path.map(|path| format!("https://www.bungie.net{}", path));
@@ -1392,19 +1305,12 @@ pub fn mattermost(
 }
 
 fn normalize_mattermost(profile: serde_json::Value) -> Result<User> {
-    let first = json_string(&profile, "first_name").unwrap_or_default();
-    let last = json_string(&profile, "last_name").unwrap_or_default();
-    let name = if !first.is_empty() || !last.is_empty() {
-        Some(format!("{} {}", first, last).trim().to_string())
-    } else {
-        json_string(&profile, "username")
-    };
-
     Ok(User {
         id: json_string(&profile, "id").unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
-        name,
+        name: full_name(&profile, "first_name", "last_name")
+            .or_else(|| json_string(&profile, "username")),
         image: None, // Mattermost avatar requires base URL
         raw: profile,
     })
@@ -1455,11 +1361,7 @@ pub fn dribbble(client_id: impl Into<String>, client_secret: impl Into<String>) 
 
 fn normalize_dribbble(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&profile, "id").unwrap_or_default(),
         email: None,
         email_verified: false,
         name: json_string(&profile, "name").or_else(|| json_string(&profile, "login")),
@@ -1493,14 +1395,6 @@ fn normalize_foursquare(profile: serde_json::Value) -> Result<User> {
         .cloned()
         .unwrap_or(profile.clone());
 
-    let first = json_string(&response, "firstName").unwrap_or_default();
-    let last = json_string(&response, "lastName").unwrap_or_default();
-    let name = if !first.is_empty() || !last.is_empty() {
-        Some(format!("{} {}", first, last).trim().to_string())
-    } else {
-        None
-    };
-
     let photo = response.get("photo");
     let image = photo.and_then(|p| {
         let prefix = json_string(p, "prefix")?;
@@ -1514,7 +1408,7 @@ fn normalize_foursquare(profile: serde_json::Value) -> Result<User> {
             .get("contact")
             .and_then(|c| json_string(c, "email")),
         email_verified: true,
-        name,
+        name: full_name(&response, "firstName", "lastName"),
         image,
         raw: profile,
     })
@@ -1576,12 +1470,7 @@ fn normalize_todoist(profile: serde_json::Value) -> Result<User> {
     let user = profile.get("user").cloned().unwrap_or(profile.clone());
 
     Ok(User {
-        id: user
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .or_else(|| json_string(&user, "id"))
-            .unwrap_or_default(),
+        id: json_id(&user, "id").unwrap_or_default(),
         email: json_string(&user, "email"),
         email_verified: true,
         name: json_string(&user, "full_name"),
@@ -1609,12 +1498,7 @@ fn normalize_clickup(profile: serde_json::Value) -> Result<User> {
     let user = profile.get("user").cloned().unwrap_or(profile.clone());
 
     Ok(User {
-        id: user
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .or_else(|| json_string(&user, "id"))
-            .unwrap_or_default(),
+        id: json_id(&user, "id").unwrap_or_default(),
         email: json_string(&user, "email"),
         email_verified: true,
         name: json_string(&user, "username"),
@@ -1642,12 +1526,7 @@ fn normalize_pipedrive(profile: serde_json::Value) -> Result<User> {
     let data = profile.get("data").cloned().unwrap_or(profile.clone());
 
     Ok(User {
-        id: data
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .or_else(|| json_string(&data, "id"))
-            .unwrap_or_default(),
+        id: json_id(&data, "id").unwrap_or_default(),
         email: json_string(&data, "email"),
         email_verified: json_bool(&data, "activated").unwrap_or(false),
         name: json_string(&data, "name"),
@@ -1677,24 +1556,14 @@ pub fn freshbooks(
 fn normalize_freshbooks(profile: serde_json::Value) -> Result<User> {
     let response = profile.get("response").cloned().unwrap_or(profile.clone());
 
-    let first = json_string(&response, "first_name").unwrap_or_default();
-    let last = json_string(&response, "last_name").unwrap_or_default();
-    let name = if !first.is_empty() || !last.is_empty() {
-        Some(format!("{} {}", first, last).trim().to_string())
-    } else {
-        None
-    };
-
     Ok(User {
-        id: response
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .or_else(|| json_string(&response, "id"))
-            .unwrap_or_default(),
+        id: json_id(&response, "id").unwrap_or_default(),
         email: json_string(&response, "email"),
-        email_verified: response.get("confirmed_at").and_then(|v| v.as_str()).is_some(),
-        name,
+        email_verified: response
+            .get("confirmed_at")
+            .and_then(|v| v.as_str())
+            .is_some(),
+        name: full_name(&response, "first_name", "last_name"),
         image: None,
         raw: profile,
     })
@@ -1747,12 +1616,7 @@ pub fn wordpress(client_id: impl Into<String>, client_secret: impl Into<String>)
 
 fn normalize_wordpress(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile
-            .get("ID")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .or_else(|| json_string(&profile, "ID"))
-            .unwrap_or_default(),
+        id: json_id(&profile, "ID").unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
         name: json_string(&profile, "display_name").or_else(|| json_string(&profile, "username")),
@@ -1778,14 +1642,7 @@ pub fn wikimedia(client_id: impl Into<String>, client_secret: impl Into<String>)
 
 fn normalize_wikimedia(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: json_string(&profile, "sub")
-            .or_else(|| {
-                profile
-                    .get("sub")
-                    .and_then(|v| v.as_i64())
-                    .map(|id| id.to_string())
-            })
-            .unwrap_or_default(),
+        id: json_id(&profile, "sub").unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: json_bool(&profile, "email_verified").unwrap_or(false),
         name: json_string(&profile, "username"),
@@ -1813,7 +1670,10 @@ fn normalize_netlify(profile: serde_json::Value) -> Result<User> {
     Ok(User {
         id: json_string(&profile, "id").unwrap_or_default(),
         email: json_string(&profile, "email"),
-        email_verified: profile.get("confirmed_at").and_then(|v| v.as_str()).is_some(),
+        email_verified: profile
+            .get("confirmed_at")
+            .and_then(|v| v.as_str())
+            .is_some(),
         name: json_string(&profile, "full_name"),
         image: json_string(&profile, "avatar_url"),
         raw: profile,
@@ -1937,11 +1797,7 @@ pub fn fortytwo_school(
 
 fn normalize_fortytwo_school(profile: serde_json::Value) -> Result<User> {
     Ok(User {
-        id: profile
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&profile, "id").unwrap_or_default(),
         email: json_string(&profile, "email"),
         email_verified: true,
         name: json_string(&profile, "usual_full_name").or_else(|| json_string(&profile, "login")),
@@ -2239,14 +2095,7 @@ pub fn frontegg(
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
-    let issuer = format!(
-        "https://{}",
-        domain
-            .as_ref()
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-    );
-    OidcProvider::new(issuer, client_id, client_secret)
+    OidcProvider::new(normalize_domain(domain.as_ref()), client_id, client_secret)
         .with_id("frontegg")
         .with_name("Frontegg")
 }
@@ -2375,22 +2224,11 @@ pub fn concept2(client_id: impl Into<String>, client_secret: impl Into<String>) 
 fn normalize_concept2(profile: serde_json::Value) -> Result<User> {
     let data = profile.get("data").cloned().unwrap_or(profile.clone());
     Ok(User {
-        id: data
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        id: json_id(&data, "id").unwrap_or_default(),
         email: json_string(&data, "email"),
         email_verified: true,
-        name: json_string(&data, "username").or_else(|| {
-            let first = json_string(&data, "first_name").unwrap_or_default();
-            let last = json_string(&data, "last_name").unwrap_or_default();
-            if !first.is_empty() || !last.is_empty() {
-                Some(format!("{} {}", first, last).trim().to_string())
-            } else {
-                None
-            }
-        }),
+        name: json_string(&data, "username")
+            .or_else(|| full_name(&data, "first_name", "last_name")),
         image: None,
         raw: profile,
     })

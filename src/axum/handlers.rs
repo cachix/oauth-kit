@@ -71,15 +71,24 @@ pub async fn signin<S: UserStore + Clone>(
     };
 
     // Store OAuth state in session
-    if let Some(r) =
-        session_insert(&session, session_keys::CSRF_STATE, &auth_request.csrf_state, "CSRF state")
-            .await
+    if let Some(r) = session_insert(
+        &session,
+        session_keys::CSRF_STATE,
+        &auth_request.csrf_state,
+        "CSRF state",
+    )
+    .await
     {
         return r;
     }
     if let Some(ref verifier) = auth_request.pkce_verifier {
-        if let Some(r) =
-            session_insert(&session, session_keys::PKCE_VERIFIER, verifier, "PKCE verifier").await
+        if let Some(r) = session_insert(
+            &session,
+            session_keys::PKCE_VERIFIER,
+            verifier,
+            "PKCE verifier",
+        )
+        .await
         {
             return r;
         }
