@@ -44,8 +44,8 @@ impl<S: UserStore + Clone> AuthRouter<S> {
     /// Set the path prefix for auth routes.
     ///
     /// Default is "/auth", which creates routes like:
-    /// - `/auth/signin/:provider`
-    /// - `/auth/callback/:provider`
+    /// - `/auth/signin/{provider}`
+    /// - `/auth/callback/{provider}`
     /// - `/auth/signout`
     pub fn with_path_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.path_prefix = prefix.into();
@@ -91,11 +91,11 @@ impl<S: UserStore + Clone> AuthRouter<S> {
 
         Router::new()
             .route(
-                &format!("{}/signin/:provider", self.path_prefix),
+                &format!("{}/signin/{{provider}}", self.path_prefix),
                 get(handlers::signin::<S>),
             )
             .route(
-                &format!("{}/callback/:provider", self.path_prefix),
+                &format!("{}/callback/{{provider}}", self.path_prefix),
                 get(handlers::callback::<S>),
             )
             .route(
