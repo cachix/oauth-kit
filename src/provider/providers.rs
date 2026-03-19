@@ -385,7 +385,7 @@ fn normalize_gitlab(profile: serde_json::Value) -> Result<User> {
             .map(|id| id.to_string())
             .unwrap_or_else(|| json_string(&profile, "username").unwrap_or_default()),
         email: json_string(&profile, "email"),
-        email_verified: json_bool(&profile, "confirmed_at").is_some(),
+        email_verified: profile.get("confirmed_at").and_then(|v| v.as_str()).is_some(),
         name: json_string(&profile, "name").or_else(|| json_string(&profile, "username")),
         image: json_string(&profile, "avatar_url"),
         raw: profile,
@@ -1693,7 +1693,7 @@ fn normalize_freshbooks(profile: serde_json::Value) -> Result<User> {
             .or_else(|| json_string(&response, "id"))
             .unwrap_or_default(),
         email: json_string(&response, "email"),
-        email_verified: json_bool(&response, "confirmed_at").is_some(),
+        email_verified: response.get("confirmed_at").and_then(|v| v.as_str()).is_some(),
         name,
         image: None,
         raw: profile,
@@ -1813,7 +1813,7 @@ fn normalize_netlify(profile: serde_json::Value) -> Result<User> {
     Ok(User {
         id: json_string(&profile, "id").unwrap_or_default(),
         email: json_string(&profile, "email"),
-        email_verified: json_bool(&profile, "confirmed_at").is_some(),
+        email_verified: profile.get("confirmed_at").and_then(|v| v.as_str()).is_some(),
         name: json_string(&profile, "full_name"),
         image: json_string(&profile, "avatar_url"),
         raw: profile,
