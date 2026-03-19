@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     response::{IntoResponse, Redirect, Response},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 use tracing::{error, info};
 
@@ -13,7 +13,7 @@ use crate::store::UserStore;
 async fn session_insert(
     session: &Session,
     key: &str,
-    value: &str,
+    value: &impl Serialize,
     label: &str,
 ) -> Option<Response> {
     if let Err(e) = session.insert(key, value).await {
@@ -229,13 +229,8 @@ pub async fn callback<S: UserStore + Clone>(
     let _ = session.remove::<String>(session_keys::PROVIDER).await;
 
     // Store user ID in session
-    if let Err(e) = session.insert(session_keys::USER_ID, &user_id).await {
-        error!("Failed to store user ID in session: {}", e);
-        return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "Session error",
-        )
-            .into_response();
+    if let Some(r) = session_insert(&session, session_keys::USER_ID, &user_id, "user ID").await {
+        return r;
     }
 
     Redirect::to(&state.signin_redirect).into_response()

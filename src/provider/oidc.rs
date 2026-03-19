@@ -14,6 +14,7 @@ use tokio::sync::OnceCell;
 use crate::error::{Error, Result};
 use crate::User;
 
+use super::oauth2_provider::build_http_client;
 use super::AuthorizationRequest;
 
 /// Generic OIDC provider that works with any OpenID Connect compliant identity provider.
@@ -111,11 +112,7 @@ impl OidcProvider {
     async fn get_provider_metadata(&self) -> Result<&CoreProviderMetadata> {
         self.discovery
             .get_or_try_init(|| async {
-                let http_client = oauth2::reqwest::ClientBuilder::new()
-                    // Following redirects opens the client up to SSRF vulnerabilities
-                    .redirect(oauth2::reqwest::redirect::Policy::none())
-                    .build()
-                    .map_err(|e| Error::Config(e.to_string()))?;
+                let http_client = build_http_client()?;
 
                 let issuer_url = IssuerUrl::new(self.issuer_url.clone())
                     .map_err(|e| Error::Config(format!("Invalid issuer URL: {}", e)))?;
@@ -289,10 +286,7 @@ impl super::OAuthProvider for OidcProvider {
             RedirectUrl::new(redirect_url.to_string()).map_err(|e| Error::Config(e.to_string()))?,
         );
 
-        let http_client = oauth2::reqwest::ClientBuilder::new()
-            .redirect(oauth2::reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| Error::Config(e.to_string()))?;
+        let http_client = build_http_client()?;
 
         let token_response = client
             .exchange_code(AuthorizationCode::new(code.to_string()))

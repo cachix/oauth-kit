@@ -28,7 +28,7 @@ pub type AsyncProfileNormalizer = for<'a> fn(
 >;
 
 /// Build an HTTP client with redirect protection against SSRF.
-fn build_http_client() -> Result<oauth2::reqwest::Client> {
+pub(crate) fn build_http_client() -> Result<oauth2::reqwest::Client> {
     oauth2::reqwest::ClientBuilder::new()
         .redirect(oauth2::reqwest::redirect::Policy::none())
         .build()
@@ -101,17 +101,7 @@ async fn oauth2_exchange_token(
     let access_token = token_response.access_token().secret().to_string();
 
     let userinfo = if let Some(url) = userinfo_url {
-        let response = http_client
-            .get(url)
-            .bearer_auth(&access_token)
-            .header("User-Agent", "oauth-kit")
-            .send()
-            .await
-            .map_err(|e| Error::ProfileFetch(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| Error::ProfileFetch(e.to_string()))?;
-        Some(response)
+        Some(fetch_json::<serde_json::Value>(http_client, url, &access_token).await?)
     } else {
         None
     };
