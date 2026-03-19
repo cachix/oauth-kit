@@ -18,7 +18,7 @@
 use axum::{response::Html, routing::get, Router};
 use oauth_kit::{
     axum::{AuthRouter, AuthUser, MaybeAuthUser},
-    provider::GitHubProvider,
+    provider::providers,
     store::MemoryStore,
 };
 use tower_sessions::{MemoryStore as SessionStore, SessionManagerLayer};
@@ -32,7 +32,7 @@ async fn main() {
     let session_layer = SessionManagerLayer::new(session_store);
 
     // Create the auth router with GitHub provider
-    let github = GitHubProvider::from_env()
+    let github = providers::github_from_env()
         .expect("Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET environment variables");
 
     let auth = AuthRouter::new(MemoryStore::new(), "http://localhost:3000")

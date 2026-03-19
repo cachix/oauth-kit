@@ -9,6 +9,27 @@ use tracing::{error, info};
 use super::router::{session_keys, AuthState};
 use crate::store::UserStore;
 
+/// Insert a value into the session, returning an error response on failure.
+async fn session_insert(
+    session: &Session,
+    key: &str,
+    value: &str,
+    label: &str,
+) -> Option<Response> {
+    if let Err(e) = session.insert(key, value).await {
+        error!("Failed to store {}: {}", label, e);
+        Some(
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Session error",
+            )
+                .into_response(),
+        )
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CallbackParams {
     code: Option<String>,
@@ -49,51 +70,29 @@ pub async fn signin<S: UserStore + Clone>(
         }
     };
 
-    // Store CSRF state in session
-    if let Err(e) = session
-        .insert(session_keys::CSRF_STATE, &auth_request.csrf_state)
-        .await
+    // Store OAuth state in session
+    if let Some(r) =
+        session_insert(&session, session_keys::CSRF_STATE, &auth_request.csrf_state, "CSRF state")
+            .await
     {
-        error!("Failed to store CSRF state: {}", e);
-        return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "Session error",
-        )
-            .into_response();
+        return r;
     }
-
-    // Store PKCE verifier if present
     if let Some(ref verifier) = auth_request.pkce_verifier {
-        if let Err(e) = session.insert(session_keys::PKCE_VERIFIER, verifier).await {
-            error!("Failed to store PKCE verifier: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Session error",
-            )
-                .into_response();
+        if let Some(r) =
+            session_insert(&session, session_keys::PKCE_VERIFIER, verifier, "PKCE verifier").await
+        {
+            return r;
         }
     }
-
-    // Store nonce if present (for OIDC)
     if let Some(ref nonce) = auth_request.nonce {
-        if let Err(e) = session.insert(session_keys::NONCE, nonce).await {
-            error!("Failed to store nonce: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Session error",
-            )
-                .into_response();
+        if let Some(r) = session_insert(&session, session_keys::NONCE, nonce, "nonce").await {
+            return r;
         }
     }
-
-    // Store provider ID
-    if let Err(e) = session.insert(session_keys::PROVIDER, &provider_id).await {
-        error!("Failed to store provider: {}", e);
-        return (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "Session error",
-        )
-            .into_response();
+    if let Some(r) =
+        session_insert(&session, session_keys::PROVIDER, &provider_id, "provider").await
+    {
+        return r;
     }
 
     info!("Redirecting to {} for OAuth", provider_id);

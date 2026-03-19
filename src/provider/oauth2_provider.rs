@@ -27,6 +27,98 @@ pub type AsyncProfileNormalizer = for<'a> fn(
     Box<dyn std::future::Future<Output = Result<User>> + Send + 'a>,
 >;
 
+/// Build an HTTP client with redirect protection against SSRF.
+fn build_http_client() -> Result<oauth2::reqwest::Client> {
+    oauth2::reqwest::ClientBuilder::new()
+        .redirect(oauth2::reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| Error::Config(e.to_string()))
+}
+
+/// Generate an OAuth2 authorization URL with PKCE.
+fn oauth2_authorization_url(
+    client_id: &str,
+    client_secret: &str,
+    authorization_url: &str,
+    token_url: &str,
+    redirect_url: &str,
+    scopes: &[String],
+) -> Result<AuthorizationRequest> {
+    let client = BasicClient::new(ClientId::new(client_id.to_string()))
+        .set_client_secret(ClientSecret::new(client_secret.to_string()))
+        .set_auth_uri(AuthUrl::new(authorization_url.to_string())?)
+        .set_token_uri(TokenUrl::new(token_url.to_string())?)
+        .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+
+    let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+
+    let mut auth_request = client.authorize_url(CsrfToken::new_random);
+
+    for scope in scopes {
+        auth_request = auth_request.add_scope(Scope::new(scope.clone()));
+    }
+
+    let (url, csrf_state) = auth_request.set_pkce_challenge(pkce_challenge).url();
+
+    Ok(AuthorizationRequest {
+        url: url.to_string(),
+        csrf_state: csrf_state.secret().to_string(),
+        pkce_verifier: Some(pkce_verifier.secret().to_string()),
+        nonce: None,
+    })
+}
+
+/// Exchange an authorization code for an access token and optionally fetch userinfo.
+async fn oauth2_exchange_token(
+    client_id: &str,
+    client_secret: &str,
+    authorization_url: &str,
+    token_url: &str,
+    redirect_url: &str,
+    http_client: &oauth2::reqwest::Client,
+    code: &str,
+    pkce_verifier: Option<&str>,
+    userinfo_url: Option<&str>,
+) -> Result<(String, Option<serde_json::Value>)> {
+    let client = BasicClient::new(ClientId::new(client_id.to_string()))
+        .set_client_secret(ClientSecret::new(client_secret.to_string()))
+        .set_auth_uri(AuthUrl::new(authorization_url.to_string())?)
+        .set_token_uri(TokenUrl::new(token_url.to_string())?)
+        .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+
+    let mut token_request = client.exchange_code(AuthorizationCode::new(code.to_string()));
+
+    if let Some(verifier) = pkce_verifier {
+        token_request =
+            token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.to_string()));
+    }
+
+    let token_response = token_request
+        .request_async(http_client)
+        .await
+        .map_err(|e| Error::TokenExchange(e.to_string()))?;
+
+    let access_token = token_response.access_token().secret().to_string();
+
+    let userinfo = if let Some(url) = userinfo_url {
+        let response = http_client
+            .get(url)
+            .bearer_auth(&access_token)
+            .header("User-Agent", "oauth-kit")
+            .send()
+            .await
+            .map_err(|e| Error::ProfileFetch(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| Error::ProfileFetch(e.to_string()))?;
+        Some(response)
+    } else {
+        None
+    };
+
+    Ok((access_token, userinfo))
+}
+
 /// Generic OAuth2 provider configuration.
 ///
 /// Use this for providers that don't support OIDC and require fetching
@@ -105,28 +197,14 @@ impl super::OAuthProvider for OAuth2Provider {
     }
 
     async fn authorization_url(&self, redirect_url: &str) -> Result<AuthorizationRequest> {
-        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
-            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
-            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
-            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
-
-        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-
-        let mut auth_request = client.authorize_url(CsrfToken::new_random);
-
-        for scope in &self.scopes {
-            auth_request = auth_request.add_scope(Scope::new(scope.clone()));
-        }
-
-        let (url, csrf_state) = auth_request.set_pkce_challenge(pkce_challenge).url();
-
-        Ok(AuthorizationRequest {
-            url: url.to_string(),
-            csrf_state: csrf_state.secret().to_string(),
-            pkce_verifier: Some(pkce_verifier.secret().to_string()),
-            nonce: None, // OAuth2 doesn't use nonce
-        })
+        oauth2_authorization_url(
+            &self.client_id,
+            &self.client_secret,
+            &self.authorization_url,
+            &self.token_url,
+            redirect_url,
+            &self.scopes,
+        )
     }
 
     async fn exchange_code(
@@ -134,49 +212,21 @@ impl super::OAuthProvider for OAuth2Provider {
         redirect_url: &str,
         code: &str,
         pkce_verifier: Option<&str>,
-        _nonce: Option<&str>, // Ignored for OAuth2
+        _nonce: Option<&str>,
     ) -> Result<(User, String)> {
-        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
-            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
-            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
-            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
-
-        let http_client = oauth2::reqwest::ClientBuilder::new()
-            .redirect(oauth2::reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| Error::Config(e.to_string()))?;
-
-        let mut token_request = client.exchange_code(AuthorizationCode::new(code.to_string()));
-
-        if let Some(verifier) = pkce_verifier {
-            token_request =
-                token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.to_string()));
-        }
-
-        let token_response = token_request
-            .request_async(&http_client)
-            .await
-            .map_err(|e| Error::TokenExchange(e.to_string()))?;
-
-        let access_token = token_response.access_token().secret().to_string();
-
-        // Fetch userinfo if endpoint exists
-        let userinfo = if let Some(url) = &self.userinfo_url {
-            let response = http_client
-                .get(url)
-                .bearer_auth(&access_token)
-                .header("User-Agent", "oauth-kit")
-                .send()
-                .await
-                .map_err(|e| Error::ProfileFetch(e.to_string()))?
-                .json()
-                .await
-                .map_err(|e| Error::ProfileFetch(e.to_string()))?;
-            Some(response)
-        } else {
-            None
-        };
+        let http_client = build_http_client()?;
+        let (access_token, userinfo) = oauth2_exchange_token(
+            &self.client_id,
+            &self.client_secret,
+            &self.authorization_url,
+            &self.token_url,
+            redirect_url,
+            &http_client,
+            code,
+            pkce_verifier,
+            self.userinfo_url.as_deref(),
+        )
+        .await?;
 
         let profile =
             userinfo.ok_or_else(|| Error::ProfileFetch("No userinfo response".to_string()))?;
@@ -264,28 +314,14 @@ impl super::OAuthProvider for OAuth2ProviderWithExtra {
     }
 
     async fn authorization_url(&self, redirect_url: &str) -> Result<AuthorizationRequest> {
-        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
-            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
-            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
-            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
-
-        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-
-        let mut auth_request = client.authorize_url(CsrfToken::new_random);
-
-        for scope in &self.scopes {
-            auth_request = auth_request.add_scope(Scope::new(scope.clone()));
-        }
-
-        let (url, csrf_state) = auth_request.set_pkce_challenge(pkce_challenge).url();
-
-        Ok(AuthorizationRequest {
-            url: url.to_string(),
-            csrf_state: csrf_state.secret().to_string(),
-            pkce_verifier: Some(pkce_verifier.secret().to_string()),
-            nonce: None,
-        })
+        oauth2_authorization_url(
+            &self.client_id,
+            &self.client_secret,
+            &self.authorization_url,
+            &self.token_url,
+            redirect_url,
+            &self.scopes,
+        )
     }
 
     async fn exchange_code(
@@ -295,47 +331,19 @@ impl super::OAuthProvider for OAuth2ProviderWithExtra {
         pkce_verifier: Option<&str>,
         _nonce: Option<&str>,
     ) -> Result<(User, String)> {
-        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
-            .set_client_secret(ClientSecret::new(self.client_secret.clone()))
-            .set_auth_uri(AuthUrl::new(self.authorization_url.clone())?)
-            .set_token_uri(TokenUrl::new(self.token_url.clone())?)
-            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
-
-        let http_client = oauth2::reqwest::ClientBuilder::new()
-            .redirect(oauth2::reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| Error::Config(e.to_string()))?;
-
-        let mut token_request = client.exchange_code(AuthorizationCode::new(code.to_string()));
-
-        if let Some(verifier) = pkce_verifier {
-            token_request =
-                token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.to_string()));
-        }
-
-        let token_response = token_request
-            .request_async(&http_client)
-            .await
-            .map_err(|e| Error::TokenExchange(e.to_string()))?;
-
-        let access_token = token_response.access_token().secret().to_string();
-
-        // Fetch userinfo if endpoint exists
-        let userinfo = if let Some(url) = &self.userinfo_url {
-            let response = http_client
-                .get(url)
-                .bearer_auth(&access_token)
-                .header("User-Agent", "oauth-kit")
-                .send()
-                .await
-                .map_err(|e| Error::ProfileFetch(e.to_string()))?
-                .json()
-                .await
-                .map_err(|e| Error::ProfileFetch(e.to_string()))?;
-            Some(response)
-        } else {
-            None
-        };
+        let http_client = build_http_client()?;
+        let (access_token, userinfo) = oauth2_exchange_token(
+            &self.client_id,
+            &self.client_secret,
+            &self.authorization_url,
+            &self.token_url,
+            redirect_url,
+            &http_client,
+            code,
+            pkce_verifier,
+            self.userinfo_url.as_deref(),
+        )
+        .await?;
 
         let user = (self.normalize_profile)(&http_client, &access_token, userinfo).await?;
 
