@@ -247,20 +247,16 @@ impl UserStore for PostgresStore {
 
 ```toml
 [dependencies]
-# Default: axum integration + OIDC support
+# Default: axum integration
 oauth-kit = "0.1"
 
 # Without axum (just the providers)
-oauth-kit = { version = "0.1", default-features = false, features = ["oidc"] }
-
-# Without OIDC (OAuth2-only providers)
-oauth-kit = { version = "0.1", default-features = false, features = ["axum-integration"] }
+oauth-kit = { version = "0.1", default-features = false }
 ```
 
 | Feature | Description |
 |---------|-------------|
-| `axum-integration` | Axum router, handlers, and extractors |
-| `oidc` | OpenID Connect support (Google, Auth0, etc.) |
+| `axum-integration` (default) | Axum router, handlers, and extractors |
 
 ## Generic OAuth2 Provider
 

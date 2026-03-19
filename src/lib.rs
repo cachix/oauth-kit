@@ -30,7 +30,7 @@
 //!     // OAuth2 providers (GitHub, Discord, etc.)
 //!     let github = providers::github_from_env().unwrap();
 //!
-//!     // OIDC providers (Google, Auth0, etc.) - requires "oidc" feature
+//!     // OIDC providers (Google, Auth0, etc.)
 //!     // let google = providers::google_from_env().unwrap();
 //!
 //!     let auth = AuthRouter::new(MemoryStore::new(), "http://localhost:3000")
@@ -59,7 +59,7 @@
 //! - Dropbox, Box, Notion, Figma
 //! - And many more...
 //!
-//! ### OIDC Providers (requires "oidc" feature)
+//! ### OIDC Providers
 //! - Google, Microsoft/Azure AD
 //! - Auth0, Okta, Keycloak
 //! - AWS Cognito, FusionAuth
@@ -109,9 +109,5 @@ pub use user::User;
 
 pub use provider::OAuth2Provider;
 pub use provider::{AuthorizationRequest, OAuthProvider, ProviderRegistry};
-
-#[cfg(feature = "oidc")]
 pub use provider::OidcProvider;
-
-#[cfg(feature = "oidc")]
 pub use provider::providers;

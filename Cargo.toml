@@ -9,14 +9,10 @@ keywords = ["oauth", "oauth2", "oidc", "authentication", "axum"]
 categories = ["authentication", "web-programming"]
 
 [features]
-default = ["axum-integration", "oidc"]
+default = ["axum-integration"]
 
 # Axum web framework integration
 axum-integration = ["dep:axum", "dep:axum-extra", "dep:tower-sessions"]
-
-# OpenID Connect support (Google, Auth0, Okta, Keycloak, Azure AD, etc.)
-# Enables OIDC discovery, ID token verification, and all OIDC providers
-oidc = ["dep:openidconnect"]
 
 [dependencies]
 oauth2 = "5"
@@ -28,9 +24,7 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = "2"
 tracing = "0.1"
-
-# Optional OIDC support
-openidconnect = { version = "4", optional = true }
+openidconnect = "4"
 
 # Optional axum integration
 axum = { version = "0.8", optional = true }
@@ -44,4 +38,4 @@ tracing-subscriber = "0.3"
 
 [[example]]
 name = "basic"
-required-features = ["axum-integration", "oidc"]
+required-features = ["axum-integration"]

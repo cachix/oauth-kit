@@ -34,7 +34,7 @@ Two provider implementations under `src/provider/`:
 
 1. **`OAuth2Provider`** (`oauth2_provider.rs`): Standard OAuth2 flow with PKCE. Fetches user profile from userinfo endpoint.
 
-2. **`OidcProvider`** (`oidc.rs`): OpenID Connect with discovery and ID token verification. Requires `oidc` feature.
+2. **`OidcProvider`** (`oidc.rs`): OpenID Connect with discovery and ID token verification.
 
 Pre-configured providers are in `src/provider/providers.rs` with factory functions like `github()`, `google()`, `auth0()`.
 
@@ -51,7 +51,6 @@ Under `src/axum/` (requires `axum-integration` feature):
 ### Feature Flags
 
 - `axum-integration` (default): Axum router, handlers, extractors
-- `oidc` (default): OpenID Connect support via `openidconnect` crate
 
 ## Code Conventions
 
