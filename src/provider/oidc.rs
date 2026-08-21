@@ -24,7 +24,7 @@ use super::AuthorizationRequest;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use oauth_kit::provider::providers;
 ///
 /// // Google

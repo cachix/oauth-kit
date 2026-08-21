@@ -16,7 +16,10 @@ use super::router::session_keys;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// use axum::response::IntoResponse;
+/// use oauth_kit::axum::AuthUser;
+///
 /// async fn protected_route(AuthUser(user_id): AuthUser<String>) -> impl IntoResponse {
 ///     format!("Hello, user {}!", user_id)
 /// }
@@ -53,7 +56,10 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// use axum::response::IntoResponse;
+/// use oauth_kit::axum::MaybeAuthUser;
+///
 /// async fn maybe_protected(MaybeAuthUser(user_id): MaybeAuthUser<String>) -> impl IntoResponse {
 ///     match user_id {
 ///         Some(id) => format!("Hello, user {}!", id),

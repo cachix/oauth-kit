@@ -46,15 +46,61 @@ async fn main() {
 }
 ```
 
+The `AuthRouter` keeps the in-flight OAuth flow and the signed-in user in the
+session, so it must be layered with a `SessionManagerLayer` as above. Without
+one, every route answers 500.
+
+`base_url` has to match the callback URL you registered with the provider.
+`AuthRouter::callback_url("github")` returns exactly what to register.
+
 ## Routes
 
 The `AuthRouter` creates:
 
 | Route | Description |
 |-------|-------------|
-| `GET /auth/signin/:provider` | Initiates OAuth flow |
-| `GET /auth/callback/:provider` | Handles OAuth callback |
-| `GET /auth/signout` | Signs out the user |
+| `GET /auth/signin/{provider}` | Initiates OAuth flow |
+| `GET /auth/callback/{provider}` | Handles OAuth callback |
+| `GET` / `POST /auth/signout` | Signs out the user |
+
+Sign-out accepts POST so it can be triggered from a form without being
+reachable by cross-site GET.
+
+## What the callback checks
+
+Before a code is ever exchanged, the callback requires that:
+
+- a sign-in is actually in progress in this session,
+- it was started for the same provider the callback is for,
+- the returned `state` matches the one stored at sign-in (compared in
+  constant time).
+
+The stored flow is single-use, so a callback URL cannot be replayed, and the
+session ID is cycled once the user is known, so a cookie planted before
+sign-in cannot be used afterwards.
+
+## Account linking
+
+Completing a flow while already signed in calls `UserStore::link_account`
+instead of `find_or_create`, so a second provider attaches to the current
+account rather than switching to another one:
+
+```text
+signed out  + /auth/signin/github  ->  find_or_create(github)  ->  user 1
+user 1      + /auth/signin/google  ->  link_account(user 1, google)
+signed out  + /auth/signin/google  ->  find_or_create(google)   ->  user 1
+```
+
+To switch accounts instead, sign out first.
+
+The identity being linked may already belong to a *different* account, and
+linking it anyway would hand the current user that account. Your store should
+detect this and return an error; the callback then answers 500 and no link is
+made. `MemoryStore` keeps it simple and just ignores a conflicting link, so
+the identity stays with its original owner but nobody is told.
+
+The default `link_account` does nothing at all, so a store that does not
+override it accepts links and silently forgets them.
 
 ## Extractors
 
@@ -219,10 +265,12 @@ let nc = providers::nextcloud(
 
 ## Custom User Store
 
-Implement `UserStore` for your database:
+`MemoryStore` is for development only: it keeps users in a `HashMap` and
+forgets them on restart. For anything real, implement `UserStore` against your
+database:
 
 ```rust
-use oauth_kit::{User, UserStore, Result};
+use oauth_kit::{User, UserStore};
 use async_trait::async_trait;
 
 struct PostgresStore { /* ... */ }
@@ -239,6 +287,16 @@ impl UserStore for PostgresStore {
     ) -> std::result::Result<Self::UserId, Self::Error> {
         // Insert or update user in database
         // Return the user ID
+    }
+
+    async fn link_account(
+        &self,
+        user_id: &Self::UserId,
+        user: &User,
+        provider: &str,
+    ) -> std::result::Result<(), Self::Error> {
+        // Attach (provider, user.id) to user_id.
+        // Return an error if it already belongs to a different account.
     }
 }
 ```
@@ -277,7 +335,8 @@ let custom = providers::oauth2(
 
 ## Environment Variables
 
-Each provider has a `*_from_env()` function. Common patterns:
+A few providers ship a `*_from_env()` constructor. For everything else, read
+the credentials yourself and pass them to the provider function.
 
 | Provider | Variables |
 |----------|-----------|
