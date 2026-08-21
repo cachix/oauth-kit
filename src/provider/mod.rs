@@ -96,10 +96,18 @@ impl ProviderRegistry {
         Self::default()
     }
 
-    /// Register a provider.
+    /// Register a provider, replacing any already registered under its ID.
     pub fn register<P: OAuthProvider>(&mut self, provider: P) -> &mut Self {
-        self.providers
-            .insert(provider.id().to_string(), Arc::new(provider));
+        let id = provider.id().to_string();
+        if self
+            .providers
+            .insert(id.clone(), Arc::new(provider))
+            .is_some()
+        {
+            // Silently shadowing is hard to spot: two factories can share an
+            // ID (gitlab and gitlab_with_url, say) and only the last works.
+            tracing::warn!("Provider '{}' was registered twice; the last one wins", id);
+        }
         self
     }
 
