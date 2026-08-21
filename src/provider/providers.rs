@@ -162,14 +162,19 @@ pub fn fusionauth(
 }
 
 /// Authentik - OIDC provider
+///
+/// `application_slug` is the slug of the Authentik application, which forms
+/// part of the issuer URL.
 pub fn authentik(
     domain: impl AsRef<str>,
+    application_slug: impl AsRef<str>,
     client_id: impl Into<String>,
     client_secret: impl Into<String>,
 ) -> OidcProvider {
     let issuer = format!(
-        "{}/application/o/default",
-        normalize_domain(domain.as_ref())
+        "{}/application/o/{}",
+        normalize_domain(domain.as_ref()),
+        application_slug.as_ref()
     );
     OidcProvider::new(issuer, client_id, client_secret)
         .with_id("authentik")
@@ -235,8 +240,16 @@ pub fn descope(
 }
 
 /// WorkOS - OIDC provider
-pub fn workos(client_id: impl Into<String>, client_secret: impl Into<String>) -> OidcProvider {
-    OidcProvider::new("https://api.workos.com", client_id, client_secret)
+///
+/// `domain` is the AuthKit domain for your environment, e.g.
+/// `your-app.authkit.app`. `https://api.workos.com` publishes no discovery
+/// document, so the tenant domain is required.
+pub fn workos(
+    domain: impl AsRef<str>,
+    client_id: impl Into<String>,
+    client_secret: impl Into<String>,
+) -> OidcProvider {
+    OidcProvider::new(normalize_domain(domain.as_ref()), client_id, client_secret)
         .with_id("workos")
         .with_name("WorkOS")
 }
@@ -630,31 +643,39 @@ pub fn notion(client_id: impl Into<String>, client_secret: impl Into<String>) ->
         "Notion",
         "https://api.notion.com/v1/oauth/authorize",
         "https://api.notion.com/v1/oauth/token",
-        Option::<String>::None, // Notion returns user info in token response
+        Some("https://api.notion.com/v1/users/me"),
         Vec::<String>::new(),
         client_id,
         client_secret,
         normalize_notion,
     )
+    // Notion rejects requests that do not pin an API version.
+    .with_userinfo_header("Notion-Version", "2022-06-28")
 }
 
 fn normalize_notion(profile: serde_json::Value) -> Result<User> {
-    // Notion returns owner info in the token response
-    let owner = profile.get("owner").and_then(|o| o.get("user")).cloned();
-    let user = owner.unwrap_or(profile.clone());
+    // For an OAuth integration /users/me answers with the bot, and the human
+    // behind it hangs off the bot's owner.
+    let user = profile
+        .get("bot")
+        .and_then(|bot| bot.get("owner"))
+        .and_then(|owner| owner.get("user"))
+        .unwrap_or(&profile);
+
+    let id = json_string(user, "id").unwrap_or_default();
+    // `person` is an object, so reading it as a string always missed the email.
+    let email = user
+        .get("person")
+        .and_then(|person| json_string(person, "email"));
+    let name = json_string(user, "name");
+    let image = json_string(user, "avatar_url");
 
     Ok(User {
-        id: json_string(&user, "id").unwrap_or_default(),
-        email: json_string(&user, "person").and_then(|_| {
-            profile
-                .get("owner")
-                .and_then(|o| o.get("user"))
-                .and_then(|u| u.get("person"))
-                .and_then(|p| json_string(p, "email"))
-        }),
+        id,
+        email,
         email_verified: true,
-        name: json_string(&user, "name"),
-        image: json_string(&user, "avatar_url"),
+        name,
+        image,
         raw: profile,
     })
 }
@@ -2268,4 +2289,94 @@ pub fn oauth2(
             })
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::OAuthProvider;
+    use serde_json::json;
+
+    #[test]
+    fn notion_reads_the_human_behind_the_bot() {
+        let user = normalize_notion(json!({
+            "object": "user",
+            "id": "bot-id",
+            "name": "My Integration",
+            "type": "bot",
+            "bot": {
+                "owner": {
+                    "type": "user",
+                    "user": {
+                        "object": "user",
+                        "id": "user-id",
+                        "name": "Jane",
+                        "avatar_url": "https://notion.test/jane.png",
+                        "type": "person",
+                        "person": { "email": "jane@example.com" },
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(user.id, "user-id");
+        assert_eq!(user.name.as_deref(), Some("Jane"));
+        assert_eq!(user.email.as_deref(), Some("jane@example.com"));
+        assert_eq!(user.image.as_deref(), Some("https://notion.test/jane.png"));
+    }
+
+    #[test]
+    fn notion_falls_back_to_the_top_level_user() {
+        let user = normalize_notion(json!({
+            "object": "user",
+            "id": "user-id",
+            "name": "Jane",
+            "person": { "email": "jane@example.com" },
+        }))
+        .unwrap();
+
+        assert_eq!(user.id, "user-id");
+        assert_eq!(user.email.as_deref(), Some("jane@example.com"));
+    }
+
+    /// Issuer URLs are only exercised at discovery time, against the network,
+    /// so pin the ones this crate builds.
+    #[test]
+    fn issuer_urls_are_built_as_documented() {
+        let cases: Vec<(OidcProvider, &str, &str)> = vec![
+            (google("i", "s"), "google", "https://accounts.google.com"),
+            (
+                auth0("tenant.auth0.com", "i", "s"),
+                "auth0",
+                "https://tenant.auth0.com",
+            ),
+            (
+                keycloak("https://kc.example.com/", "myrealm", "i", "s"),
+                "keycloak",
+                "https://kc.example.com/realms/myrealm",
+            ),
+            (
+                azure_ad("tenant-id", "i", "s"),
+                "azure",
+                "https://login.microsoftonline.com/tenant-id/v2.0",
+            ),
+            (
+                authentik("https://sso.example.com", "my-app", "i", "s"),
+                "authentik",
+                "https://sso.example.com/application/o/my-app",
+            ),
+            (
+                workos("my-app.authkit.app", "i", "s"),
+                "workos",
+                "https://my-app.authkit.app",
+            ),
+        ];
+
+        for (provider, id, issuer) in cases {
+            assert_eq!(provider.id(), id);
+            assert_eq!(provider.issuer_url(), issuer, "issuer for {id}");
+            assert!(!provider.name().is_empty(), "{id} has no name");
+        }
+    }
 }
