@@ -24,7 +24,7 @@ use super::AuthorizationRequest;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use oauth_kit::provider::providers;
 ///
 /// // Google
@@ -307,7 +307,7 @@ impl super::OAuthProvider for OidcProvider {
             .claims(&client.id_token_verifier(), &Nonce::new(nonce.to_string()))
             .map_err(|e| Error::TokenExchange(format!("ID token verification failed: {}", e)))?;
 
-        let user = user_from_claims(claims)?;
+        let user = super::finalize_profile(user_from_claims(claims)?, &self.id)?;
 
         Ok((user, access_token))
     }

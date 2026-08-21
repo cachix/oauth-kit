@@ -1,0 +1,6 @@
+/target
+/result
+.devenv/
+.direnv/
+devenv.local.nix
+.claude/settings.local.json

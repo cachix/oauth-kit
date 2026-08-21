@@ -7,11 +7,10 @@ use crate::store::UserStore;
 
 /// Session keys used by the auth router.
 pub mod session_keys {
+    /// Identifies the signed-in user; read by the `AuthUser` extractors.
     pub const USER_ID: &str = "oauth_kit_user_id";
-    pub const CSRF_STATE: &str = "oauth_kit_csrf_state";
-    pub const PKCE_VERIFIER: &str = "oauth_kit_pkce_verifier";
-    pub const NONCE: &str = "oauth_kit_nonce";
-    pub const PROVIDER: &str = "oauth_kit_provider";
+    /// Holds the in-flight OAuth flow between signin and callback.
+    pub(crate) const FLOW: &str = "oauth_kit_flow";
 }
 
 /// Builder for creating OAuth authentication routes.
@@ -30,11 +29,13 @@ impl<S: UserStore + Clone> AuthRouter<S> {
     /// # Arguments
     /// * `store` - The user store for persisting authentication data
     /// * `base_url` - The base URL of your application (e.g., "http://localhost:3000")
+    ///
+    /// A trailing slash on `base_url` is ignored.
     pub fn new(store: S, base_url: impl Into<String>) -> Self {
         Self {
             providers: ProviderRegistry::new(),
             store: Arc::new(store),
-            base_url: base_url.into(),
+            base_url: base_url.into().trim_end_matches('/').to_string(),
             path_prefix: "/auth".to_string(),
             signin_redirect: "/".to_string(),
             signout_redirect: "/".to_string(),
@@ -47,8 +48,17 @@ impl<S: UserStore + Clone> AuthRouter<S> {
     /// - `/auth/signin/{provider}`
     /// - `/auth/callback/{provider}`
     /// - `/auth/signout`
+    ///
+    /// The prefix is normalized to a leading slash and no trailing slash, so
+    /// "oauth", "/oauth" and "/oauth/" all mean the same thing.
     pub fn with_path_prefix(mut self, prefix: impl Into<String>) -> Self {
-        self.path_prefix = prefix.into();
+        let prefix = prefix.into();
+        let prefix = prefix.trim().trim_matches('/');
+        self.path_prefix = if prefix.is_empty() {
+            String::new()
+        } else {
+            format!("/{}", prefix)
+        };
         self
     }
 
@@ -65,9 +75,21 @@ impl<S: UserStore + Clone> AuthRouter<S> {
     }
 
     /// Register an OAuth provider.
+    ///
+    /// Providers are keyed by [`OAuthProvider::id`], so registering two with
+    /// the same ID keeps only the last. Give one of them a distinct
+    /// `with_id(..)` when combining, say, `gitlab` and `gitlab_with_url`.
     pub fn with_provider<P: OAuthProvider>(mut self, provider: P) -> Self {
         self.providers.register(provider);
         self
+    }
+
+    /// The callback URL to register with the provider.
+    pub fn callback_url(&self, provider_id: &str) -> String {
+        format!(
+            "{}{}/callback/{}",
+            self.base_url, self.path_prefix, provider_id
+        )
     }
 
     /// Build the router with all configured routes.
@@ -92,7 +114,8 @@ impl<S: UserStore + Clone> AuthRouter<S> {
             )
             .route(
                 &format!("{}/signout", self.path_prefix),
-                get(handlers::signout::<S>),
+                // POST is the CSRF-safe form; GET is kept so plain links work.
+                get(handlers::signout::<S>).post(handlers::signout::<S>),
             )
             .with_state(state)
     }

@@ -87,6 +87,7 @@ async fn oauth2_exchange_token(
     code: &str,
     pkce_verifier: Option<&str>,
     userinfo_url: Option<&str>,
+    userinfo_headers: &[(String, String)],
 ) -> Result<(String, Option<serde_json::Value>)> {
     let client = BasicClient::new(ClientId::new(client_id.to_string()))
         .set_client_secret(ClientSecret::new(client_secret.to_string()))
@@ -109,7 +110,15 @@ async fn oauth2_exchange_token(
     let access_token = token_response.access_token().secret().to_string();
 
     let userinfo = if let Some(url) = userinfo_url {
-        Some(fetch_json::<serde_json::Value>(http_client, url, &access_token).await?)
+        Some(
+            fetch_json_with_headers::<serde_json::Value>(
+                http_client,
+                url,
+                &access_token,
+                userinfo_headers,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -131,6 +140,7 @@ pub struct OAuth2Provider {
     authorization_url: String,
     token_url: String,
     userinfo_url: Option<String>,
+    userinfo_headers: Vec<(String, String)>,
     scopes: Vec<String>,
     client_id: String,
     client_secret: String,
@@ -156,6 +166,7 @@ impl OAuth2Provider {
             authorization_url: authorization_url.into(),
             token_url: token_url.into(),
             userinfo_url: userinfo_url.map(|u| u.into()),
+            userinfo_headers: Vec::new(),
             scopes: scopes.into_iter().map(|s| s.into()).collect(),
             client_id: client_id.into(),
             client_secret: client_secret.into(),
@@ -184,6 +195,7 @@ impl OAuth2Provider {
             authorization_url: authorization_url.into(),
             token_url: token_url.into(),
             userinfo_url: userinfo_url.map(|u| u.into()),
+            userinfo_headers: Vec::new(),
             scopes: scopes.into_iter().map(|s| s.into()).collect(),
             client_id: client_id.into(),
             client_secret: client_secret.into(),
@@ -212,6 +224,19 @@ impl OAuth2Provider {
     /// Add additional scopes to the default set.
     pub fn add_scope(mut self, scope: impl Into<String>) -> Self {
         self.scopes.push(scope.into());
+        self
+    }
+
+    /// Send an additional header with every userinfo request.
+    ///
+    /// Some APIs need more than a bearer token: Notion, for example, rejects
+    /// requests that do not pin an API version.
+    pub fn with_userinfo_header(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.userinfo_headers.push((name.into(), value.into()));
         self
     }
 }
@@ -255,13 +280,15 @@ impl super::OAuthProvider for OAuth2Provider {
             code,
             pkce_verifier,
             self.userinfo_url.as_deref(),
+            &self.userinfo_headers,
         )
         .await?;
 
         let user = match &self.normalizer {
             Normalizer::Sync(normalize) => {
-                let profile = userinfo
-                    .ok_or_else(|| Error::ProfileFetch("No userinfo response".to_string()))?;
+                let profile = userinfo.ok_or_else(|| {
+                    Error::Config(format!("{} has no userinfo endpoint configured", self.id))
+                })?;
                 normalize(profile)?
             }
             Normalizer::Async(normalize) => {
@@ -269,7 +296,7 @@ impl super::OAuthProvider for OAuth2Provider {
             }
         };
 
-        Ok((user, access_token))
+        Ok((super::finalize_profile(user, &self.id)?, access_token))
     }
 }
 
@@ -332,12 +359,34 @@ pub async fn fetch_json<T: DeserializeOwned>(
     url: &str,
     access_token: &str,
 ) -> Result<T> {
-    client
+    fetch_json_with_headers(client, url, access_token, &[]).await
+}
+
+/// Same as [`fetch_json`], with extra headers some APIs require alongside the
+/// bearer token.
+pub(crate) async fn fetch_json_with_headers<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    url: &str,
+    access_token: &str,
+    headers: &[(String, String)],
+) -> Result<T> {
+    let mut request = client
         .get(url)
         .bearer_auth(access_token)
         .header("User-Agent", "oauth-kit")
+        .header("Accept", "application/json");
+
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+
+    request
         .send()
         .await
+        .map_err(|e| Error::ProfileFetch(e.to_string()))?
+        // Without this a rejected token answered with a 200 and an error body
+        // would normalize into a user with no ID.
+        .error_for_status()
         .map_err(|e| Error::ProfileFetch(e.to_string()))?
         .json()
         .await
