@@ -12,7 +12,7 @@ use axum::{
     Router,
 };
 use oauth_kit::{
-    axum::AuthRouter,
+    axum::{AuthRouter, AuthUser},
     provider::{AuthorizationRequest, OAuthProvider},
     store::MemoryStore,
     Result, User,
@@ -44,6 +44,12 @@ impl StubProvider {
             subject: "stub-user-1".to_string(),
             exchanges: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Set the provider-side user ID this stub authenticates as.
+    fn with_subject(mut self, subject: &str) -> Self {
+        self.subject = subject.to_string();
+        self
     }
 }
 
@@ -276,4 +282,209 @@ async fn signout_also_accepts_post() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
+}
+/// Records which store method each callback took, so the tests can tell
+/// linking apart from a fresh sign-in.
+#[derive(Debug, Clone, PartialEq)]
+enum StoreCall {
+    FindOrCreate { provider: String, subject: String },
+    Link { user_id: String, provider: String },
+}
+
+#[derive(Clone)]
+struct RecordingStore {
+    calls: Arc<Mutex<Vec<StoreCall>>>,
+    link_fails: bool,
+}
+
+impl RecordingStore {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            link_fails: false,
+        }
+    }
+
+    fn failing_to_link() -> Self {
+        Self {
+            link_fails: true,
+            ..Self::new()
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("store rejected the link")]
+struct RecordingStoreError;
+
+#[async_trait]
+impl oauth_kit::UserStore for RecordingStore {
+    type UserId = String;
+    type Error = RecordingStoreError;
+
+    async fn find_or_create(
+        &self,
+        user: &User,
+        provider: &str,
+    ) -> std::result::Result<String, Self::Error> {
+        self.calls.lock().unwrap().push(StoreCall::FindOrCreate {
+            provider: provider.to_string(),
+            subject: user.id.clone(),
+        });
+        Ok(format!("account-for-{}", user.id))
+    }
+
+    async fn link_account(
+        &self,
+        user_id: &String,
+        _user: &User,
+        provider: &str,
+    ) -> std::result::Result<(), Self::Error> {
+        self.calls.lock().unwrap().push(StoreCall::Link {
+            user_id: user_id.clone(),
+            provider: provider.to_string(),
+        });
+        if self.link_fails {
+            return Err(RecordingStoreError);
+        }
+        Ok(())
+    }
+}
+
+/// Two providers whose stub users have different subjects, so a switch would
+/// be visible as a different account ID.
+///
+/// `/whoami` reports the account the session is signed in as.
+fn linking_app(store: RecordingStore) -> Router {
+    let auth = AuthRouter::new(store, "http://localhost:3000")
+        .with_provider(StubProvider::new("one", "state-one").with_subject("subject-one"))
+        .with_provider(StubProvider::new("two", "state-two").with_subject("subject-two"))
+        .build();
+
+    Router::new()
+        .route("/whoami", axum::routing::get(whoami))
+        .merge(auth)
+        .layer(SessionManagerLayer::new(SessionStore::default()))
+}
+
+async fn whoami(AuthUser(user_id): AuthUser<String>) -> String {
+    user_id
+}
+
+async fn body_of(response: Response<Body>) -> String {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+async fn sign_in(
+    app: &Router,
+    provider: &str,
+    state: &str,
+    cookie: Option<&str>,
+) -> Response<Body> {
+    let signin = get(app, &format!("/auth/signin/{provider}"), cookie).await;
+    let cookie = session_cookie(&signin)
+        .or_else(|| cookie.map(str::to_string))
+        .expect("a session cookie");
+    get(
+        app,
+        &format!("/auth/callback/{provider}?code=the-code&state={state}"),
+        Some(&cookie),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_second_provider_links_to_the_signed_in_account() {
+    let store = RecordingStore::new();
+    let calls = store.calls.clone();
+    let app = linking_app(store);
+
+    let first = sign_in(&app, "one", "state-one", None).await;
+    assert_eq!(first.status(), StatusCode::SEE_OTHER);
+    let cookie = session_cookie(&first).expect("sign-in re-issues the cookie");
+
+    let second = sign_in(&app, "two", "state-two", Some(&cookie)).await;
+    assert_eq!(second.status(), StatusCode::SEE_OTHER);
+
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![
+            StoreCall::FindOrCreate {
+                provider: "one".to_string(),
+                subject: "subject-one".to_string(),
+            },
+            // Linked to the account from the first sign-in, not looked up
+            // afresh under provider "two".
+            StoreCall::Link {
+                user_id: "account-for-subject-one".to_string(),
+                provider: "two".to_string(),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn linking_leaves_the_signed_in_user_in_place() {
+    let store = RecordingStore::new();
+    let app = linking_app(store);
+
+    let first = sign_in(&app, "one", "state-one", None).await;
+    let cookie = session_cookie(&first).unwrap();
+    assert_eq!(
+        body_of(get(&app, "/whoami", Some(&cookie)).await).await,
+        "account-for-subject-one"
+    );
+
+    sign_in(&app, "two", "state-two", Some(&cookie)).await;
+
+    // Still the original account: linking must not switch identities, even
+    // though provider "two" authenticated a different subject.
+    assert_eq!(
+        body_of(get(&app, "/whoami", Some(&cookie)).await).await,
+        "account-for-subject-one"
+    );
+}
+
+#[tokio::test]
+async fn a_rejected_link_does_not_sign_anyone_in() {
+    let store = RecordingStore::failing_to_link();
+    let calls = store.calls.clone();
+    let app = linking_app(store);
+
+    let first = sign_in(&app, "one", "state-one", None).await;
+    let cookie = session_cookie(&first).unwrap();
+
+    let second = sign_in(&app, "two", "state-two", Some(&cookie)).await;
+    assert_eq!(second.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    // The rejected link must not fall back to creating a second account.
+    assert!(!calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|call| matches!(call, StoreCall::FindOrCreate { provider, .. } if provider == "two")));
+}
+
+#[tokio::test]
+async fn signing_out_first_switches_accounts_instead_of_linking() {
+    let store = RecordingStore::new();
+    let calls = store.calls.clone();
+    let app = linking_app(store);
+
+    let first = sign_in(&app, "one", "state-one", None).await;
+    let cookie = session_cookie(&first).unwrap();
+
+    let signout = get(&app, "/auth/signout", Some(&cookie)).await;
+    let cookie = session_cookie(&signout).unwrap_or(cookie);
+
+    sign_in(&app, "two", "state-two", Some(&cookie)).await;
+
+    let calls = calls.lock().unwrap();
+    assert!(
+        matches!(&calls[1], StoreCall::FindOrCreate { provider, .. } if provider == "two"),
+        "after signout the second provider should sign in on its own: {calls:?}"
+    );
 }

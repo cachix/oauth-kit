@@ -176,6 +176,28 @@ pub async fn callback<S: UserStore + Clone>(
         user.id, provider_id
     );
 
+    // Completing a flow while already signed in attaches the provider to that
+    // account rather than switching to another one. Reaching here requires the
+    // state stored in this session at signin, which an attacker cannot read,
+    // so a link can only be driven by the session's own owner.
+    let signed_in: Option<S::UserId> = session.get(session_keys::USER_ID).await.ok().flatten();
+    if let Some(user_id) = signed_in {
+        if let Err(e) = state
+            .store
+            .link_account(&user_id, &user, &provider_id)
+            .await
+        {
+            error!("Failed to link {} to {:?}: {}", provider_id, user_id, e);
+            return server_error("Failed to link account");
+        }
+
+        info!("Linked {} to signed-in user {:?}", provider_id, user_id);
+
+        // The session already identifies this user, so there is no privilege
+        // change here and nothing to rotate.
+        return Redirect::to(&state.signin_redirect).into_response();
+    }
+
     let user_id = match state.store.find_or_create(&user, &provider_id).await {
         Ok(id) => id,
         Err(e) => {
