@@ -65,6 +65,26 @@ pub trait OAuthProvider: Send + Sync + 'static {
     ) -> Result<(User, String)>;
 }
 
+/// Final checks applied to every profile before it reaches the caller.
+pub(crate) fn finalize_profile(mut user: User, provider: &str) -> Result<User> {
+    // Providers answer a rejected token with a 200 and an error body often
+    // enough that without this a failed profile fetch would sign in a user
+    // keyed on the empty string.
+    if user.id.is_empty() {
+        return Err(crate::Error::ProfileFetch(format!(
+            "{} profile contained no user ID",
+            provider
+        )));
+    }
+
+    // "Verified" is meaningless without an address to verify.
+    if user.email.is_none() {
+        user.email_verified = false;
+    }
+
+    Ok(user)
+}
+
 /// Registry of OAuth providers.
 #[derive(Default, Clone)]
 pub struct ProviderRegistry {
@@ -91,5 +111,30 @@ impl ProviderRegistry {
     /// List all registered provider IDs.
     pub fn provider_ids(&self) -> Vec<&str> {
         self.providers.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_profile_without_an_id_is_rejected() {
+        // A rejected token answered with a 200 and an error body normalizes to
+        // an empty ID; signing that in would key every such user on "".
+        assert!(finalize_profile(User::new(""), "github").is_err());
+        assert!(finalize_profile(User::new("1"), "github").is_ok());
+    }
+
+    #[test]
+    fn an_absent_email_is_never_verified() {
+        let mut user = User::new("1");
+        user.email_verified = true;
+        assert!(!finalize_profile(user, "github").unwrap().email_verified);
+
+        let user = User::new("1")
+            .with_email("a@example.com")
+            .with_email_verified(true);
+        assert!(finalize_profile(user, "github").unwrap().email_verified);
     }
 }
