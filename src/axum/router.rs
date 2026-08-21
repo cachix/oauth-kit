@@ -7,11 +7,10 @@ use crate::store::UserStore;
 
 /// Session keys used by the auth router.
 pub mod session_keys {
+    /// Identifies the signed-in user; read by the `AuthUser` extractors.
     pub const USER_ID: &str = "oauth_kit_user_id";
-    pub const CSRF_STATE: &str = "oauth_kit_csrf_state";
-    pub const PKCE_VERIFIER: &str = "oauth_kit_pkce_verifier";
-    pub const NONCE: &str = "oauth_kit_nonce";
-    pub const PROVIDER: &str = "oauth_kit_provider";
+    /// Holds the in-flight OAuth flow between signin and callback.
+    pub(crate) const FLOW: &str = "oauth_kit_flow";
 }
 
 /// Builder for creating OAuth authentication routes.
@@ -92,7 +91,8 @@ impl<S: UserStore + Clone> AuthRouter<S> {
             )
             .route(
                 &format!("{}/signout", self.path_prefix),
-                get(handlers::signout::<S>),
+                // POST is the CSRF-safe form; GET is kept so plain links work.
+                get(handlers::signout::<S>).post(handlers::signout::<S>),
             )
             .with_state(state)
     }

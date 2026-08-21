@@ -35,6 +35,8 @@ tower-sessions = { version = "0.14", optional = true }
 tokio = { version = "1", features = ["full"] }
 tower-sessions = { version = "0.14", features = ["memory-store"] }
 tracing-subscriber = "0.3"
+tower = { version = "0.5", features = ["util"] }
+async-trait = "0.1"
 
 [[example]]
 name = "basic"
